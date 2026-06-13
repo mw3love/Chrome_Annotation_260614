@@ -1,0 +1,351 @@
+/* 코랄 형광펜 하이라이트 */
+.ca-hl {
+  background-color: rgba(255, 127, 80, 0.45); /* coral */
+  border-radius: 2px;
+  cursor: inherit;
+}
+
+/* 빨간 테두리 캡처 박스 */
+.ca-rect {
+  position: absolute;
+  border: 2px solid #e23b3b;
+  background-color: transparent; /* 채움 없음 → 캡처에 빨간 톤이 안 깔림 */
+  box-sizing: border-box;
+  z-index: 2147483646;
+  pointer-events: auto; /* hover 삭제(×)를 띄우려면 이벤트를 받아야 함 */
+}
+
+/* 네모 모드 커서 */
+.ca-rect-cursor,
+.ca-rect-cursor * {
+  cursor: crosshair !important;
+}
+
+/* 떠있는 도구막대 */
+.ca-toolbar {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 2147483647;
+  display: flex;
+  gap: 4px;
+  padding: 6px;
+  background: #ffffff;
+  border: 1px solid #d9d9d9;
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  font-family: -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+  font-size: 13px;
+  line-height: 1;
+}
+.ca-toolbar.ca-hidden {
+  display: none;
+}
+/* 도구막대 본체(버튼 묶음) — 접기 토글 대상 */
+.ca-bar-main {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.ca-toolbar.ca-bar-collapsed .ca-bar-main {
+  display: none;
+}
+.ca-grip {
+  align-self: center;
+  cursor: move;
+  color: #bbb;
+  font-size: 14px;
+  padding: 0 4px;
+  user-select: none;
+  touch-action: none; /* 포인터 드래그가 스크롤로 가로채이지 않게 */
+}
+.ca-toolbar button {
+  all: unset;
+  padding: 7px 10px;
+  border-radius: 7px;
+  cursor: pointer !important; /* 네모 모드의 crosshair !important 를 이김 */
+  color: #333;
+  white-space: nowrap;
+  user-select: none;
+}
+.ca-toolbar button:hover {
+  background: #f1f1f1;
+}
+.ca-toolbar button.active {
+  background: #ffe2d8;
+  color: #c0392b;
+  font-weight: 600;
+}
+
+/* 주석 위 hover 시 뜨는 미니 툴바 (저장/삭제) */
+.ca-tools {
+  position: fixed;
+  z-index: 2147483647;
+  display: flex;
+  gap: 3px;
+}
+.ca-tools .ca-tool {
+  all: unset;
+  width: 20px;
+  height: 20px;
+  line-height: 20px;
+  text-align: center;
+  font-size: 11px;
+  font-family: -apple-system, "Segoe UI", sans-serif;
+  color: #fff;
+  background: #555;
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  cursor: pointer !important; /* 네모 모드의 crosshair !important 를 이김 */
+}
+.ca-tools .ca-tool:hover {
+  filter: brightness(1.15);
+}
+.ca-tools .ca-tool-del {
+  background: #e23b3b;
+}
+
+/* 형광펜 모드 커서 = I빔(글자 선택) */
+.ca-hl-cursor,
+.ca-hl-cursor * {
+  cursor: text !important;
+}
+
+/* 모드 커서(I빔·십자선)가 우리 UI의 이동 핸들까지 덮지 않게 — 더 높은 우선순위로 move 유지 */
+.ca-hl-cursor .ca-grip,
+.ca-rect-cursor .ca-grip,
+.ca-hl-cursor .ca-panel-grip,
+.ca-rect-cursor .ca-panel-grip,
+.ca-hl-cursor .ca-panel-head,
+.ca-rect-cursor .ca-panel-head,
+.ca-hl-cursor .ca-panel-title,
+.ca-rect-cursor .ca-panel-title {
+  cursor: move !important;
+}
+
+/* 모드 활성 신호: 화면 가장자리 테두리 + 배지 */
+.ca-modefx {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483640;
+  pointer-events: none; /* 클릭 통과 */
+  border: 3px solid transparent;
+  box-sizing: border-box;
+  display: none;
+}
+.ca-modefx.ca-on {
+  display: block;
+}
+.ca-modefx.ca-highlight {
+  border-color: rgba(255, 127, 80, 0.85); /* 코랄 */
+}
+.ca-modefx.ca-rect {
+  border-color: rgba(226, 59, 59, 0.85); /* 빨강 */
+}
+.ca-modefx span {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 3px 12px;
+  border-radius: 0 0 8px 8px;
+  font-family: -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+}
+.ca-modefx.ca-highlight span {
+  background: rgba(255, 127, 80, 0.95);
+}
+.ca-modefx.ca-rect span {
+  background: rgba(226, 59, 59, 0.95);
+}
+
+/* 내보내기 메뉴 */
+.ca-menu {
+  position: fixed;
+  top: 56px;
+  right: 16px;
+  z-index: 2147483647;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  background: #ffffff;
+  border: 1px solid #d9d9d9;
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  font-family: -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+  font-size: 13px;
+}
+.ca-menu button {
+  all: unset;
+  padding: 8px 12px;
+  border-radius: 7px;
+  cursor: pointer !important;
+  color: #333;
+  white-space: nowrap;
+}
+.ca-menu button:hover {
+  background: #f1f1f1;
+}
+
+/* AI 결과 패널 */
+.ca-panel {
+  position: fixed;
+  top: 56px;
+  right: 16px;
+  z-index: 2147483647;
+  width: 360px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: #ffffff;
+  border: 1px solid #d9d9d9;
+  border-radius: 12px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.22);
+  font-family: -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+}
+.ca-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #eee;
+  cursor: move; /* 헤더를 잡고 패널 이동 */
+}
+.ca-panel-grip {
+  cursor: move;
+  color: #bbb;
+  font-size: 13px;
+  user-select: none;
+  touch-action: none; /* 포인터 드래그가 스크롤로 가로채이지 않게 */
+}
+.ca-panel-head {
+  touch-action: none;
+}
+.ca-panel-title {
+  flex: 1;
+  font-weight: 600;
+  font-size: 13px;
+  color: #333;
+}
+/* 최소화: 헤더만 남기고 본문 접기 */
+.ca-panel.ca-min .ca-panel-body {
+  display: none;
+}
+.ca-panel.ca-min .ca-panel-head {
+  border-bottom: none;
+}
+.ca-panel-head button {
+  all: unset;
+  width: 22px;
+  height: 22px;
+  line-height: 22px;
+  text-align: center;
+  border-radius: 6px;
+  cursor: pointer !important;
+  color: #666;
+  font-size: 13px;
+}
+.ca-panel-head button:hover {
+  background: #f1f1f1;
+}
+.ca-panel-body {
+  padding: 12px 14px;
+  overflow-y: auto;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #222;
+  white-space: pre-wrap;
+}
+.ca-panel-body .ca-line {
+  margin: 3px 0;
+}
+/* 최상위 단락(1. 2. …) — 위에 한 칸 간격 + 제목색(파랑·굵게) */
+.ca-panel-body .ca-sec {
+  margin-top: 16px;
+  font-weight: 700;
+  color: #1a5fb4;
+}
+.ca-panel-body .ca-sec:first-child {
+  margin-top: 0;
+}
+.ca-panel-body .ca-md-h {
+  font-weight: 700;
+  color: #1a5fb4;
+  margin: 12px 0 4px;
+  font-size: 15px;
+}
+/* 주석(형광펜·네모) 유래 항목 — 텍스트에만 코랄 배경 (들여쓴 빈 공간엔 안 깔림) */
+.ca-panel-body .ca-anno-mark {
+  background: rgba(255, 127, 80, 0.22);
+  border-radius: 3px;
+  padding: 0 3px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+/* 하위 단계 번호 마커 색 (가.=초록, 1)=주황, 가)=보라) */
+.ca-panel-body .ca-mk {
+  font-weight: 600;
+}
+.ca-panel-body .ca-l1 {
+  color: #1a5fb4;
+}
+.ca-panel-body .ca-l2 {
+  color: #1d7a6f;
+}
+.ca-panel-body .ca-l3 {
+  color: #b45309;
+}
+.ca-panel-body .ca-l4 {
+  color: #7c3aed;
+}
+/* 빨강 표시 hover 삭제(×) */
+.ca-markdel {
+  all: unset;
+  position: fixed;
+  z-index: 2147483647;
+  width: 16px;
+  height: 16px;
+  line-height: 16px;
+  text-align: center;
+  font-size: 10px;
+  color: #fff;
+  background: #e23b3b;
+  border-radius: 50%;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  cursor: pointer !important;
+}
+/* 백틱 표시 — 노션처럼 빨강 */
+.ca-panel-body code {
+  color: #e2552e;
+  background: rgba(226, 85, 46, 0.1);
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-family: "Consolas", monospace;
+}
+/* 빨강 표시 버튼: `A` — 백틱은 회색, 가운데 A만 빨강(코드 느낌 + 글자 강조 의미) */
+.ca-panel-mark {
+  color: #999 !important;
+  font-family: "Consolas", monospace;
+  font-weight: 700;
+  font-size: 13px !important;
+}
+.ca-panel-mark .ca-mark-a {
+  color: #e2552e;
+  font-weight: 800;
+}
+.ca-panel-mark.active {
+  background: #ffe2d8 !important;
+}
+
+/* 인쇄/PDF 출력에는 확장 UI를 숨김 */
+@media print {
+  .ca-toolbar,
+  .ca-tools,
+  .ca-menu,
+  .ca-panel {
+    display: none !important;
+  }
+}

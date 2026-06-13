@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>Reading Highlighter 설정</title>
+    <style>
+      body {
+        font-family: -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+        max-width: 520px;
+        margin: 40px auto;
+        padding: 0 20px;
+        color: #222;
+        line-height: 1.5;
+      }
+      h1 { font-size: 20px; }
+      label { display: block; margin: 18px 0 6px; font-weight: 600; font-size: 14px; }
+      input, select {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 9px 10px;
+        border: 1px solid #ccc;
+        border-radius: 8px;
+        font-size: 14px;
+      }
+      .hint { color: #888; font-size: 12px; margin-top: 4px; }
+      .row { display: flex; gap: 8px; margin-top: 20px; }
+      button {
+        padding: 9px 16px;
+        border: none;
+        border-radius: 8px;
+        font-size: 14px;
+        cursor: pointer;
+        color: #fff;
+        background: #ff7f50;
+      }
+      button.secondary { background: #555; }
+      #status { margin-top: 16px; font-size: 13px; min-height: 18px; word-break: break-all; }
+      #status.ok { color: #1e8e3e; }
+      #status.err { color: #d93025; }
+    </style>
+  </head>
+  <body>
+    <h1>Reading Highlighter 설정</h1>
+
+    <label for="key">AI API 키</label>
+    <input id="key" type="password" placeholder="API 키 입력" autocomplete="off" />
+    <div class="hint">키는 이 브라우저(chrome.storage.local)에만 저장되며 외부로 전송되지 않습니다.</div>
+
+    <label for="model">AI 모델 (요약·텍스트 질문에 사용)</label>
+    <select id="model">
+      <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+    </select>
+    <div class="hint">
+      키를 저장하면 게이트웨이의 전체 모델 목록을 불러옵니다. 비전(이미지 질문)은 항상
+      gemini-2.5-flash로 처리됩니다.
+    </div>
+
+    <div class="row">
+      <button id="save">저장</button>
+      <button id="test" class="secondary">연결 테스트</button>
+    </div>
+    <div id="status"></div>
+
+    <script src="options.js"></script>
+  </body>
+</html>

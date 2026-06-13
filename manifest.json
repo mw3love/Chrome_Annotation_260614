@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "Reading Highlighter",
+  "version": "0.1.0",
+  "description": "긴 글을 형광펜 치며 읽는 주석 도구 (코랄 하이라이트 + 네모 캡처)",
+  "permissions": ["activeTab", "tabs", "storage"],
+  "host_permissions": ["<all_urls>", "https://factchat-cloud.mindlogic.ai/*"],
+  "background": {
+    "service_worker": "src/background/worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/content/content.js"],
+      "css": ["src/content/content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_title": "주석 도구막대 토글"
+  },
+  "options_ui": {
+    "page": "src/options/options.html",
+    "open_in_tab": true
+  }
+}
