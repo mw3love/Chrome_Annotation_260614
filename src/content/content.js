@@ -21,11 +21,11 @@
     '<span class="ca-bar-main">' +
     '<button data-mode="highlight" title="형광펜 (단축키 1)">🖊️ 형광펜</button>' +
     '<button data-mode="rect" title="네모 캡처 영역 (단축키 2)">⬚ 네모</button>' +
-    '<button data-act="summarize" title="강조 부분 중심으로 AI 요약">🤖 요약</button>' +
-    '<button data-act="pdf" title="페이지 주석 PDF로 저장">💾 저장</button>' +
-    '<button data-act="md" title="페이지 주석 마크다운 복사(텍스트만)">📋 MD</button>' +
+    '<button data-act="pdf" title="주석 정리 미리보기·PDF (단축키 3)">💾 주석</button>' +
+    '<button data-act="notion" title="Notion 페이지로 저장 (단축키 4)">📝 Notion</button>' +
+    '<button data-act="summarize" title="강조 부분 중심 AI 요약 (단축키 5)">🤖 AI</button>' +
     "</span>" +
-    '<button class="ca-bar-min" data-act="bar-min" title="도구막대 접기/펼치기">▸</button>';
+    '<button class="ca-bar-min" data-act="bar-min" title="도구막대 접기/펼치기 (단축키 `)">▸</button>';
   bar.classList.add("ca-bar-collapsed"); // 기본은 접힌 상태
 
   // 모드 활성 신호: 화면 가장자리 테두리 + 배지 (클릭 통과)
@@ -43,11 +43,19 @@
   btnAsk.className = "ca-tool";
   btnAsk.textContent = "🤖";
   btnAsk.title = "이 주석에 AI로 질문";
+  const btnCopyTxt = document.createElement("button"); // 형광펜 전용 — 문장 텍스트 복사
+  btnCopyTxt.className = "ca-tool";
+  btnCopyTxt.textContent = "📋";
+  btnCopyTxt.title = "이 형광펜 문장을 복사";
+  const btnCopyImg = document.createElement("button"); // 네모 전용 — 캡처를 실제 PNG로 클립보드 복사
+  btnCopyImg.className = "ca-tool";
+  btnCopyImg.textContent = "🖼";
+  btnCopyImg.title = "이 캡처를 이미지로 복사 (Notion·한글·Word에 붙여넣기)";
   const btnDel = document.createElement("button");
   btnDel.className = "ca-tool ca-tool-del";
   btnDel.textContent = "✕";
   btnDel.title = "삭제";
-  tools.append(btnAsk, btnDel);
+  tools.append(btnAsk, btnCopyTxt, btnCopyImg, btnDel);
   document.documentElement.appendChild(tools);
 
   // AI 결과 표시 패널
@@ -57,10 +65,10 @@
   panel.innerHTML =
     '<div class="ca-panel-head"><span class="ca-panel-grip" title="드래그해 이동">⠿</span>' +
     '<span class="ca-panel-title">AI</span>' +
-    '<button class="ca-panel-mark" title="선택한 글자를 빨강 표시(토글). 단축키 `">`<span class="ca-mark-a">A</span>`</button>' +
+    '<button class="ca-panel-mark" title="선택한 글자를 빨강 표시(토글). 단축키 ~ (Shift+백틱)">`<span class="ca-mark-a">A</span>`</button>' +
     '<button class="ca-panel-clearmark" title="빨강 표시 모두 해제">↺</button>' +
     '<button class="ca-panel-pdf" title="요약 PDF로 저장">💾</button>' +
-    '<button class="ca-panel-copy" title="복사">📋</button>' +
+    '<button class="ca-panel-copy" title="복사(인용문 텍스트 — 이미지는 네모의 🖼로 개별 복사)">📋</button>' +
     '<button class="ca-panel-min" title="최소화/펼치기">▾</button></div>' +
     '<div class="ca-panel-body"></div>';
   document.documentElement.appendChild(panel);
@@ -68,16 +76,50 @@
   let panelRaw = ""; // 복사용 원문(마크다운)
   let panelTitle = "";
   let panelIsMd = false;
+  let panelKind = ""; // "summary" | "text" | "annotations" — 패널 💾 가 무엇을 인쇄할지 분기
   // 최소화/펼치기 — 헤더만 남기고 본문 접기
   const minBtn = panel.querySelector(".ca-panel-min");
   minBtn.addEventListener("click", () => {
     minBtn.textContent = panel.classList.toggle("ca-min") ? "▴" : "▾";
   });
-  panel.querySelector(".ca-panel-copy").addEventListener("click", () => {
+  panel.querySelector(".ca-panel-copy").addEventListener("click", () => copyPanel());
+  // 주석 정리 복사 — 패널 DOM 대신 '깨끗한 시맨틱 HTML'(h1/blockquote/img)과 마크다운 텍스트를 같이 실어
+  // 각 앱이 알아서 고른다(Word=인용+이미지, Notion=인용 블록, 한글=텍스트). 이미지는 네모의 🖼 버튼으로 개별 복사.
+  // 그 외(요약 등) 패널은 기존대로 마크다운/텍스트 복사.
+  async function copyPanel() {
+    if (panelKind === "annotations") {
+      const items = collectSorted();
+      const esc = (s) =>
+        String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+      let html = "<h1>" + esc(document.title) + "</h1>";
+      let text = "";
+      for (const it of items) {
+        if (it.type === "highlight") {
+          html += "<blockquote>" + esc(it.text) + "</blockquote>";
+          text += "> " + it.text + "\n\n";
+        } else if (it.image) {
+          html += '<p><img src="' + it.image + '" alt="capture"></p>';
+          text += "[캡처 이미지]\n\n";
+        }
+      }
+      try {
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            "text/html": new Blob([html], { type: "text/html" }),
+            "text/plain": new Blob([text], { type: "text/plain" }),
+          }),
+        ]);
+      } catch (e) {
+        navigator.clipboard.writeText(text).catch(() => {}); // 폴백: 텍스트만
+      }
+      return;
+    }
     navigator.clipboard.writeText(getPanelMarkdown()).catch(() => {});
-  });
-  // 요약 PDF — 패널 내용(색 포함)을 그대로 인쇄
-  panel.querySelector(".ca-panel-pdf").addEventListener("click", () => exportSummaryPDF());
+  }
+  // 패널 💾 — 주석 정리 미리보기면 주석 PDF, 그 외(요약)면 요약 PDF
+  panel.querySelector(".ca-panel-pdf").addEventListener("click", () =>
+    panelKind === "annotations" ? exportPDF() : exportSummaryPDF()
+  );
 
   // 요소를 핸들로 잡고 드래그해 이동(도구막대·패널 공용).
   // Pointer Capture 사용 — 페이지에 광고 iframe이 많아도 포인터 이벤트를 핸들이 독점해
@@ -129,8 +171,8 @@
   makeDraggable(panel, panel.querySelector(".ca-panel-head")); // 패널: 헤더로 이동
   makeDraggable(bar, bar.querySelector(".ca-grip"), true); // 도구막대: ⠿ 손잡이로 이동(오른쪽 고정)
 
-  // 백틱(빨강) 표시 — 토글. 버튼을 켜두면(활성) 패널에서 선택만 해도 표시/해제됨.
-  // 단축키: 패널에 선택이 있을 때 ` 키로도 표시/해제.
+  // 빨강 표시 — 토글. 버튼을 켜두면(활성) 패널에서 선택만 해도 표시/해제됨.
+  // 단축키: 패널에 선택이 있을 때 ~(Shift+백틱) 키로도 표시/해제. (백틱은 도구막대 토글로 이동)
   let markMode = false;
   const markBtn = panel.querySelector(".ca-panel-mark");
   markBtn.addEventListener("mousedown", (e) => e.preventDefault());
@@ -143,7 +185,7 @@
     if (markMode) setTimeout(toggleMarkSelection, 0); // 선택 확정 후 적용
   });
   document.addEventListener("keydown", (e) => {
-    if (e.key !== "`" || !panelIsMd) return;
+    if (e.key !== "~" || !panelIsMd) return;
     const sel = window.getSelection();
     if (sel && !sel.isCollapsed && panelBody.contains(sel.anchorNode)) {
       e.preventDefault();
@@ -204,6 +246,7 @@
     panel.querySelector(".ca-panel-title").textContent = title;
     panelTitle = title;
     panelIsMd = !!isMd;
+    panelKind = isMd ? "summary" : "text";
     panelRaw = text;
     if (isMd) {
       panelBody.style.whiteSpace = "normal";
@@ -396,17 +439,33 @@
     if (hasSel) highlightSelection();
   }
 
+  // 도구막대 접기/펼치기 — 버튼·단축키(백틱) 공용.
+  // 접으면 패널을 완전히 숨기고(도구막대 최소화만 보임), 펼칠 때 원래 열려 있었으면 같이 복원.
+  let panelHiddenByBar = false;
+  function toggleBar() {
+    const collapsed = bar.classList.toggle("ca-bar-collapsed");
+    bar.querySelector(".ca-bar-min").textContent = collapsed ? "▸" : "▾";
+    if (collapsed) {
+      if (panel.style.display !== "none") {
+        panelHiddenByBar = true; // 펼칠 때 다시 열도록 기억
+        panel.style.display = "none";
+      }
+    } else if (panelHiddenByBar) {
+      panel.style.display = "flex";
+      panelHiddenByBar = false;
+    }
+  }
+
   bar.addEventListener("click", (e) => {
     const btn = e.target.closest("button");
     if (!btn) return;
     if (btn.dataset.act === "bar-min") {
-      const collapsed = bar.classList.toggle("ca-bar-collapsed");
-      btn.textContent = collapsed ? "▸" : "▾";
+      toggleBar();
       return;
     }
     if (btn.dataset.act === "summarize") return aiSummarize();
-    if (btn.dataset.act === "pdf") return exportPDF();
-    if (btn.dataset.act === "md") return exportMarkdown();
+    if (btn.dataset.act === "pdf") return showAnnotationsPanel();
+    if (btn.dataset.act === "notion") return exportNotion();
     if (btn.dataset.act === "off") return applyMode(null);
     if (btn.dataset.mode === "highlight" && mode !== "highlight") return activateHighlight();
     applyMode(mode === btn.dataset.mode ? null : btn.dataset.mode);
@@ -424,12 +483,24 @@
     const typing =
       el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
     if (typing) return;
-    if (e.key === "1") {
+    if (e.key === "`") {
+      e.preventDefault();
+      toggleBar(); // 백틱: 도구막대 접기/펼치기
+    } else if (e.key === "1") {
       e.preventDefault();
       mode === "highlight" ? applyMode(null) : activateHighlight();
     } else if (e.key === "2") {
       e.preventDefault();
       applyMode(mode === "rect" ? null : "rect");
+    } else if (e.key === "3") {
+      e.preventDefault();
+      showAnnotationsPanel();
+    } else if (e.key === "4") {
+      e.preventDefault();
+      exportNotion();
+    } else if (e.key === "5") {
+      e.preventDefault();
+      aiSummarize();
     } else if (e.key === "Escape" && mode) {
       applyMode(null);
     }
@@ -622,6 +693,9 @@
   }
   function showToolsFor(el) {
     toolsTarget = el;
+    const isRect = el.classList.contains("ca-rect");
+    btnCopyImg.style.display = isRect ? "" : "none"; // 이미지 복사는 네모만
+    btnCopyTxt.style.display = isRect ? "none" : ""; // 문장 복사는 형광펜만
     tools.style.display = "flex"; // 🤖 질문은 형광펜·네모 둘 다 제공
     placeTools(el);
     clearTimeout(hideTimer);
@@ -659,6 +733,36 @@
     else removeAnnotation(toolsTarget);
     tools.style.display = "none";
     toolsTarget = null;
+  });
+  // 형광펜 문장(hover 한 span)을 텍스트로 복사
+  btnCopyTxt.addEventListener("click", () => {
+    if (!toolsTarget) return;
+    const ann = annotations.find((a) => a.id === toolsTarget.dataset.caId);
+    const txt = (ann && ann.text) || toolsTarget.textContent || "";
+    if (!txt) return;
+    navigator.clipboard
+      .writeText(txt)
+      .then(() => {
+        const prev = btnCopyTxt.textContent;
+        btnCopyTxt.textContent = "✅";
+        setTimeout(() => (btnCopyTxt.textContent = prev), 900);
+      })
+      .catch(() => {});
+  });
+  // 네모 캡처를 실제 PNG(image/png)로 클립보드에 올림 — data-URI HTML 과 달리 Notion·한글에도 붙는다.
+  btnCopyImg.addEventListener("click", async () => {
+    if (!toolsTarget) return;
+    const ann = annotations.find((a) => a.id === toolsTarget.dataset.caId);
+    if (!ann || !ann.image) return alert("이미지가 아직 캡처되지 않았습니다.");
+    try {
+      const blob = await (await fetch(ann.image)).blob();
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+      const prev = btnCopyImg.textContent;
+      btnCopyImg.textContent = "✅";
+      setTimeout(() => (btnCopyImg.textContent = prev), 900);
+    } catch (e) {
+      alert("이미지 복사 실패: " + e.message);
+    }
   });
   btnAsk.addEventListener("click", async () => {
     if (!toolsTarget) return;
@@ -794,6 +898,38 @@
     );
   }
 
+  // 툴바 💾 → 텍스트 인용문 + 네모 캡처를 문서 순서대로 패널에 정리해 미리보기.
+  // 패널의 💾 를 누르면 exportPDF() 로 인쇄 — 인쇄 레이아웃(buildHTML)과 일치.
+  function showAnnotationsPanel() {
+    const items = collectSorted();
+    if (!items.length) return alert("정리할 주석이 없습니다. 형광펜이나 네모를 먼저 추가하세요.");
+    const esc = (s) =>
+      String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+    // blockquote/figure 같은 시맨틱 태그는 사이트(특히 다크 테마) CSS 가 타고 들어와 색을 덮으므로
+    // div + 명시 색상(!important)으로 렌더 — 패널은 페이지 DOM 에 주입돼 사이트 CSS 영향을 받는다.
+    const html = items
+      .map((it) =>
+        it.type === "highlight"
+          ? '<div style="border-left:3px solid #ff7f50;background:#fff5f0!important;color:#222!important;' +
+            'margin:8px 0;padding:6px 10px;border-radius:4px">' + esc(it.text) + "</div>"
+          : it.image
+          ? '<div style="margin:10px 0"><img src="' + it.image +
+            '" style="max-width:100%;border:1px solid #ddd;border-radius:4px"></div>'
+          : ""
+      )
+      .join("");
+    panel.classList.remove("ca-min");
+    minBtn.textContent = "▾";
+    panel.querySelector(".ca-panel-title").textContent = "주석 정리";
+    panelTitle = "주석 정리";
+    panelIsMd = false;
+    panelKind = "annotations";
+    panelRaw = "";
+    panelBody.style.whiteSpace = "normal";
+    panelBody.innerHTML = html;
+    panel.style.display = "flex";
+  }
+
   function exportPDF() {
     const items = collectSorted();
     if (!items.length) return alert("내보낼 주석이 없습니다.");
@@ -893,15 +1029,70 @@
     );
   }
 
-  function exportMarkdown() {
-    // 텍스트(형광펜)만 복사 — 이미지는 PDF/노션 경로가 담당
-    const quotes = collectSorted().filter((it) => it.type === "highlight");
-    if (!quotes.length) return alert("복사할 텍스트 주석(형광펜)이 없습니다.");
-    let md = "# " + document.title + "\n\n" + location.href + "\n\n";
-    quotes.forEach((it) => (md += "> " + it.text + "\n\n"));
-    navigator.clipboard
-      .writeText(md)
-      .then(() => alert("텍스트 인용문이 클립보드에 복사되었습니다."))
-      .catch((e) => alert("복사 실패: " + e.message));
+  // ---------- Notion 내보내기 (5단계) ----------
+  // 요약 패널이 떠 있으면 그 아웃라인을 Notion 블록용 라인으로 수집(제목=heading, 나머지=들여쓰기 보존 문단).
+  // 노션 API 의 중첩 깊이 제한을 피하려 중첩 리스트 대신 들여쓰기+마커를 살린 문단으로 보낸다.
+  function collectSummaryForNotion() {
+    if (!panelIsMd || !panelBody.querySelector(".ca-line")) return null;
+    const out = [];
+    panelBody.querySelectorAll(".ca-line").forEach((div) => {
+      const text = serializeInline(div).trim();
+      if (!text) return;
+      if (div.classList.contains("ca-md-h")) out.push({ kind: "h2", text });
+      else out.push({ kind: "p", text: " ".repeat(+(div.dataset.indent || 0)) + text });
+    });
+    return out.length ? out : null;
+  }
+
+  async function exportNotion() {
+    const { notion_token, notion_parent_id } = await chrome.storage.local.get([
+      "notion_token",
+      "notion_parent_id",
+    ]);
+    if (!notion_token || !notion_parent_id) {
+      return alert("Notion 토큰/부모 페이지가 설정되지 않았습니다. 확장 옵션에서 입력하세요.");
+    }
+    const items = collectSorted()
+      .map((it) =>
+        it.type === "highlight"
+          ? { kind: "quote", text: it.text }
+          : it.image
+          ? { kind: "image", dataUrl: it.image }
+          : null
+      )
+      .filter(Boolean);
+    const summary = collectSummaryForNotion();
+    if (!items.length && !summary) return alert("내보낼 주석이나 요약이 없습니다.");
+    showPanel("Notion", "Notion에 저장 중…", false);
+    chrome.runtime.sendMessage(
+      {
+        type: "notion-export",
+        parentId: notion_parent_id,
+        title: document.title || location.href,
+        url: location.href,
+        items,
+        summary,
+      },
+      (resp) => {
+        if (chrome.runtime.lastError)
+          return showPanel("Notion", "오류: " + chrome.runtime.lastError.message, false);
+        if (resp && resp.ok) {
+          // window.open 을 쓰지 않는다 — 이미지 업로드로 콜백이 늦어지면 클릭 제스처가 만료돼
+          // 팝업이 막히고 about:blank 유령 창이 뜬다. 대신 사용자가 직접 클릭할 링크를 띄운다.
+          showPanel("Notion", "저장 완료 ✅", false);
+          if (resp.url) {
+            const a = document.createElement("a");
+            a.href = resp.url;
+            a.target = "_blank";
+            a.rel = "noopener";
+            a.textContent = "Notion에서 열기 ↗";
+            a.style.cssText = "color:#1a5fb4;display:inline-block;margin-top:10px;font-weight:600";
+            panelBody.appendChild(a);
+          }
+        } else {
+          showPanel("Notion", "실패: " + ((resp && resp.error) || "알 수 없음"), false);
+        }
+      }
+    );
   }
 })();

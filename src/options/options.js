@@ -77,3 +77,48 @@ document.getElementById("test").addEventListener("click", async () => {
     else setStatus("실패: " + ((resp && resp.error) || "알 수 없음"), "err");
   });
 });
+
+// ---------- Notion 설정 ----------
+const notionTokenEl = document.getElementById("notion-token");
+const notionParentEl = document.getElementById("notion-parent");
+const notionStatusEl = document.getElementById("notion-status");
+
+function setNotionStatus(text, cls) {
+  notionStatusEl.textContent = text;
+  notionStatusEl.className = cls || "";
+}
+
+chrome.storage.local.get(["notion_token", "notion_parent_id"]).then((s) => {
+  if (s.notion_token) notionTokenEl.value = s.notion_token;
+  if (s.notion_parent_id) notionParentEl.value = s.notion_parent_id;
+});
+
+async function persistNotion() {
+  await chrome.storage.local.set({
+    notion_token: notionTokenEl.value.trim(),
+    notion_parent_id: notionParentEl.value.trim(),
+  });
+}
+
+document.getElementById("notion-save").addEventListener("click", async () => {
+  await persistNotion();
+  setNotionStatus("저장됨.", "ok");
+});
+
+document.getElementById("notion-test").addEventListener("click", async () => {
+  await persistNotion();
+  if (!notionTokenEl.value.trim() || !notionParentEl.value.trim()) {
+    return setNotionStatus("토큰과 부모 페이지를 먼저 입력하세요.", "err");
+  }
+  setNotionStatus("테스트 중…", "");
+  chrome.runtime.sendMessage(
+    { type: "notion-test", parentId: notionParentEl.value.trim() },
+    (resp) => {
+      if (chrome.runtime.lastError) {
+        return setNotionStatus("오류: " + chrome.runtime.lastError.message, "err");
+      }
+      if (resp && resp.ok) setNotionStatus('연결 성공 ✓  부모 페이지: "' + resp.title + '"', "ok");
+      else setNotionStatus("실패: " + ((resp && resp.error) || "알 수 없음"), "err");
+    }
+  );
+});

@@ -1,10 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Reading Highlighter",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "긴 글을 형광펜 치며 읽는 주석 도구 (코랄 하이라이트 + 네모 캡처)",
   "permissions": ["activeTab", "tabs", "storage"],
-  "host_permissions": ["<all_urls>", "https://factchat-cloud.mindlogic.ai/*"],
+  "host_permissions": [
+    "<all_urls>",
+    "https://factchat-cloud.mindlogic.ai/*",
+    "https://api.notion.com/*"
+  ],
   "background": {
     "service_worker": "src/background/worker.js"
   },

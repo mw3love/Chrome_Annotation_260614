@@ -34,9 +34,9 @@
         background: #ff7f50;
       }
       button.secondary { background: #555; }
-      #status { margin-top: 16px; font-size: 13px; min-height: 18px; word-break: break-all; }
-      #status.ok { color: #1e8e3e; }
-      #status.err { color: #d93025; }
+      #status, #notion-status { margin-top: 16px; font-size: 13px; min-height: 18px; word-break: break-all; }
+      .ok { color: #1e8e3e; }
+      .err { color: #d93025; }
     </style>
   </head>
   <body>
@@ -60,6 +60,29 @@
       <button id="test" class="secondary">연결 테스트</button>
     </div>
     <div id="status"></div>
+
+    <hr style="margin: 32px 0; border: none; border-top: 1px solid #eee" />
+
+    <h1 style="font-size: 17px">Notion 내보내기 (선택)</h1>
+
+    <label for="notion-token">Notion 통합(Integration) 토큰</label>
+    <input id="notion-token" type="password" placeholder="ntn_… 또는 secret_…" autocomplete="off" />
+    <div class="hint">
+      notion.so/my-integrations 에서 내부 통합을 만들고 발급한 토큰. 이 브라우저에만 저장됩니다.
+    </div>
+
+    <label for="notion-parent">부모 페이지 ID(또는 페이지 URL)</label>
+    <input id="notion-parent" type="text" placeholder="페이지 URL을 붙여넣어도 됩니다" autocomplete="off" />
+    <div class="hint">
+      저장할 Notion 페이지를 열고 ··· → '연결(Connections)'에서 위 통합을 추가한 뒤, 그 페이지
+      URL이나 ID를 입력하세요. 내보내기 시 이 페이지 아래에 새 하위 페이지가 생성됩니다.
+    </div>
+
+    <div class="row">
+      <button id="notion-save">Notion 저장</button>
+      <button id="notion-test" class="secondary">Notion 연결 테스트</button>
+    </div>
+    <div id="notion-status"></div>
 
     <script src="options.js"></script>
   </body>

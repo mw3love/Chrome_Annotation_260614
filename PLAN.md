@@ -37,19 +37,27 @@ options.html / options.js               # API 키 입력
 
 ## 로드맵 (단계 = 검증 기준)
 
-- [ ] **1. 주석 MVP** — 텍스트 선택 시 코랄 배경, 드래그 시 빨간 박스, 지우개
+- [x] **1. 주석 MVP** — 텍스트 선택 시 코랄 배경, 드래그 시 빨간 박스, 지우개
   - 검증: 임의 웹페이지에서 두 주석 + 지우기 동작
-- [ ] **2. 캡처 저장** — 네모 영역 PNG 크롭 → 다운로드/클립보드
-  - 검증: 저장 이미지가 드래그 영역과 일치
-- [ ] **3. 내보내기** — 주석+캡처를 PDF(인쇄)/마크다운(클립보드)
+- [x] **2. 캡처 저장** — 네모 영역 PNG 크롭 (AI/요약/PDF/이미지복사용으로 유지)
+  - 검증: 캡처 이미지가 드래그 영역과 일치
+- [x] **3. 내보내기** — 주석+캡처를 PDF(인쇄). '주석' 버튼이 정리 미리보기 패널 → 패널 💾로 인쇄
   - 검증: 출력물에 인용+이미지 포함
-- [ ] **4. AI 요약** — 주석을 `[강조]` 표시해 게이트웨이 전송, 주석 중점 요약 + 이미지 Q&A
+- [x] **4. AI 요약** — 주석을 `★` 표시해 게이트웨이 전송, 주석 중점 요약 + 이미지 Q&A
   - 검증: 요약이 형광펜 친 문장 중심
-- [ ] **5. Notion** — 통합 토큰으로 페이지 생성
-  - 검증: Notion에 페이지 생성
+- [x] **5. Notion** — 통합 토큰 + 부모 페이지에 하위 페이지 생성(인용문+요약+캡처 업로드)
+  - 검증: 📝 Notion 버튼 → 부모 페이지 아래 새 페이지에 주석·이미지 저장 (실조건 확인)
 
 ## 게이트웨이 메모 (2026-06-13 실측)
 
 - 베이스: `https://factchat-cloud.mindlogic.ai/v1/gateway`
 - `/chat/completions` OpenAI 호환. 비전: `image_url` data URI 입력 → `gemini-2.5-flash`, `gpt-5-mini` 정상
 - 키: `~/.claude/.secrets/jbnu-gateway.key` (확장에선 옵션 페이지로 별도 입력)
+
+## Notion 연동 메모 (2026-06-14 실측)
+
+- API 호출은 전부 background worker 에서 (`api.notion.com` host_permissions 추가) → CORS 우회. Notion API 는 CORS 헤더 미제공이라 콘텐츠 스크립트 직접 호출 불가.
+- 헤더: `Notion-Version: 2026-03-11`. 인증: 옵션 페이지에 통합 토큰 + 부모 페이지(통합과 Connections 공유 필요) 입력.
+- 부모 페이지 ID 는 URL 맨 끝 32자리 hex(끝에서부터 추출) — 슬러그의 날짜 등 hex-유사 숫자가 ID 앞에 붙는 함정 주의. `?v=뷰ID` 쿼리도 먼저 제거.
+- 이미지: File Upload API 3단계(`POST /file_uploads` → `/send` 멀티파트 → image 블록의 `file_upload.id`). 페이지 children 은 요청당 100개 제한 → 초과분 PATCH append.
+- **클립보드 제약**: 붙여넣기(Ctrl+V)는 수동적이라 업로드를 못 일으킨다. Notion·한글은 클립보드 HTML 의 data-URI 이미지를 버림(Word만 받음). → 이미지를 두 앱에 넣으려면 실제 PNG(image/png) 클립보드(네모의 🖼 버튼, 1장씩) 또는 Notion API 업로드(📝 버튼)뿐.
