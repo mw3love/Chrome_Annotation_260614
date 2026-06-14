@@ -107,9 +107,10 @@ async function notionUploadImage(dataUrl) {
 const notionRich = (text) => [{ type: "text", text: { content: String(text).slice(0, 2000) } }];
 
 // 수집한 주석·요약 + 업로드된 이미지 id 로 Notion 블록 배열 구성
+// 순서: 주석을 문서 위→아래 위치순으로 인용·이미지를 섞어 배치(주석정리 패널과 동일) → AI 요약.
+// URL·네모 개수는 DB 속성(URL·네모)에 있으므로 본문에는 북마크·콜아웃을 넣지 않는다.
 function notionExportBlocks(spec, imageIds) {
   const blocks = [];
-  if (spec.url) blocks.push({ type: "bookmark", bookmark: { url: spec.url } });
   let imgIdx = 0;
   for (const it of spec.items || []) {
     if (it.kind === "quote") {
@@ -119,6 +120,7 @@ function notionExportBlocks(spec, imageIds) {
       if (id) blocks.push({ type: "image", image: { type: "file_upload", file_upload: { id } } });
     }
   }
+  // AI 요약 (포함 선택 시에만 spec.summary 가 채워져 옴)
   if (spec.summary && spec.summary.length) {
     blocks.push({ type: "heading_2", heading_2: { rich_text: notionRich("AI 요약") } });
     for (const s of spec.summary) {
@@ -129,14 +131,72 @@ function notionExportBlocks(spec, imageIds) {
   return blocks;
 }
 
-// 페이지 생성 — children 은 요청당 100개 제한이라 초과분은 PATCH append
-async function notionCreatePage(parentId, title, blocks) {
+// 인박스 DB 스키마 — '제목' 이 title 속성. 행 생성 시 키가 이와 정확히 일치해야 함.
+function notionDbSchema() {
+  return {
+    제목: { title: {} },
+    URL: { url: {} },
+    저장일: { date: {} },
+    분류: { select: { options: [{ name: "미분류" }] } },
+    하이라이트: { number: {} },
+    네모: { number: {} },
+    요약포함: { checkbox: {} },
+  };
+}
+
+// 부모 페이지 밑에 인박스 DB 를 1회 생성하고 data_source_id 를 저장·재사용.
+// 2025-09-03+ 버전부터 행(페이지) 부모는 database_id 가 아니라 data_source_id 다.
+// data_source_id 는 DB 생성 응답의 data_sources[0].id 로 바로 얻는다(별도 GET 불필요).
+// 부모 페이지가 바뀌면(옵션 변경) 새 DB 를 만든다.
+async function notionGetOrCreateDatabase(parentId) {
+  const parentKey = normNotionId(parentId);
+  const saved = await chrome.storage.local.get([
+    "notion_data_source_id",
+    "notion_db_parent",
+  ]);
+  if (saved.notion_data_source_id && saved.notion_db_parent === parentKey)
+    return saved.notion_data_source_id;
+  const db = await notionFetch("/databases", {
+    method: "POST",
+    headers: await notionHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      parent: { type: "page_id", page_id: parentKey },
+      title: notionRich("Reading Highlighter 인박스"),
+      initial_data_source: { properties: notionDbSchema() },
+    }),
+  });
+  const dsId = db.data_sources && db.data_sources[0] && db.data_sources[0].id;
+  if (!dsId) throw new Error("DB 생성 응답에 data_source 가 없습니다.");
+  await chrome.storage.local.set({
+    notion_db_id: db.id,
+    notion_data_source_id: dsId,
+    notion_db_parent: parentKey,
+  });
+  return dsId;
+}
+
+// 행 속성 — notionDbSchema 의 키와 정확히 일치해야 함.
+function notionRowProps(spec) {
+  const props = {
+    제목: { title: notionRich(spec.title || "Untitled") },
+    저장일: { date: { start: new Date().toISOString() } },
+    분류: { select: { name: "미분류" } },
+    하이라이트: { number: spec.hlCount || 0 },
+    네모: { number: spec.rectCount || 0 },
+    요약포함: { checkbox: !!(spec.summary && spec.summary.length) },
+  };
+  if (spec.url) props.URL = { url: spec.url };
+  return props;
+}
+
+// DB 행(=페이지) 생성 — children 은 요청당 100개 제한이라 초과분은 PATCH append
+async function notionCreateRow(dataSourceId, spec, blocks) {
   const page = await notionFetch("/pages", {
     method: "POST",
     headers: await notionHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({
-      parent: { page_id: normNotionId(parentId) },
-      properties: { title: { title: notionRich(title || "Untitled") } },
+      parent: { type: "data_source_id", data_source_id: dataSourceId },
+      properties: notionRowProps(spec),
       children: blocks.slice(0, 100),
     }),
   });
@@ -211,16 +271,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
-  // 콘텐츠 스크립트: 주석+요약을 Notion 페이지로 저장
-  // (이미지부터 업로드해 id 확보 → 블록 구성 → 페이지 생성. 모든 Notion 호출은 워커에서 = CORS 우회)
+  // 콘텐츠 스크립트: 주석+요약을 Notion 인박스 DB 의 행으로 저장
+  // (DB 확보/생성 → 이미지 업로드해 id 확보 → 블록 구성 → 행 생성. 모든 Notion 호출은 워커에서 = CORS 우회)
   if (msg.type === "notion-export") {
     (async () => {
+      const dataSourceId = await notionGetOrCreateDatabase(msg.parentId);
       const imageIds = [];
       for (const it of msg.items || []) {
         if (it.kind === "image") imageIds.push(await notionUploadImage(it.dataUrl));
       }
       const blocks = notionExportBlocks(msg, imageIds);
-      return notionCreatePage(msg.parentId, msg.title, blocks);
+      return notionCreateRow(dataSourceId, msg, blocks);
     })()
       .then((page) => sendResponse({ ok: true, url: page.url, id: page.id }))
       .catch((e) => sendResponse({ ok: false, error: e.message }));

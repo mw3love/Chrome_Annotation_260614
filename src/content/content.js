@@ -19,11 +19,12 @@
   bar.innerHTML =
     '<span class="ca-grip" title="드래그해 이동">⠿</span>' +
     '<span class="ca-bar-main">' +
-    '<button data-mode="highlight" title="형광펜 (단축키 1)">🖊️ 형광펜</button>' +
-    '<button data-mode="rect" title="네모 캡처 영역 (단축키 2)">⬚ 네모</button>' +
-    '<button data-act="pdf" title="주석 정리 미리보기·PDF (단축키 3)">💾 주석</button>' +
-    '<button data-act="notion" title="Notion 페이지로 저장 (단축키 4)">📝 Notion</button>' +
-    '<button data-act="summarize" title="강조 부분 중심 AI 요약 (단축키 5)">🤖 AI</button>' +
+    '<button data-mode="highlight" title="형광펜 (단축키 Alt+1)">🖊️ 형광펜</button>' +
+    '<button data-mode="rect" title="네모 캡처 영역 (단축키 Alt+2)">⬚ 네모</button>' +
+    '<span class="ca-sep"></span>' +
+    '<button data-act="panel" title="주석 정리·AI 요약 패널 (단축키 Alt+3)">📋 정리·AI</button>' +
+    '<span class="ca-sep"></span>' +
+    '<button data-act="notion" title="Notion 인박스 DB로 저장 (단축키 Alt+4)">📝 Notion</button>' +
     "</span>" +
     '<button class="ca-bar-min" data-act="bar-min" title="도구막대 접기/펼치기 (단축키 `)">▸</button>';
   bar.classList.add("ca-bar-collapsed"); // 기본은 접힌 상태
@@ -54,8 +55,12 @@
   const btnDel = document.createElement("button");
   btnDel.className = "ca-tool ca-tool-del";
   btnDel.textContent = "✕";
-  btnDel.title = "삭제";
-  tools.append(btnAsk, btnCopyTxt, btnCopyImg, btnDel);
+  btnDel.title = "이 주석만 삭제";
+  const btnDelAll = document.createElement("button"); // 전체삭제 — 개별삭제 옆에 통합
+  btnDelAll.className = "ca-tool ca-tool-del";
+  btnDelAll.textContent = "🗑";
+  btnDelAll.title = "이 페이지 주석 전체 삭제";
+  tools.append(btnAsk, btnCopyTxt, btnCopyImg, btnDel, btnDelAll);
   document.documentElement.appendChild(tools);
 
   // AI 결과 표시 패널
@@ -64,25 +69,71 @@
   panel.style.display = "none";
   panel.innerHTML =
     '<div class="ca-panel-head"><span class="ca-panel-grip" title="드래그해 이동">⠿</span>' +
-    '<span class="ca-panel-title">AI</span>' +
+    '<span class="ca-panel-title">정리·AI</span>' +
     '<button class="ca-panel-mark" title="선택한 글자를 빨강 표시(토글). 단축키 ~ (Shift+백틱)">`<span class="ca-mark-a">A</span>`</button>' +
     '<button class="ca-panel-clearmark" title="빨강 표시 모두 해제">↺</button>' +
-    '<button class="ca-panel-pdf" title="요약 PDF로 저장">💾</button>' +
+    '<span class="ca-panel-sep ca-sep1"></span>' +
     '<button class="ca-panel-copy" title="복사(인용문 텍스트 — 이미지는 네모의 🖼로 개별 복사)">📋</button>' +
+    '<button class="ca-panel-pdf" title="PDF로 저장">💾</button>' +
     '<button class="ca-panel-min" title="최소화/펼치기">▾</button></div>' +
+    '<div class="ca-panel-tabs">' +
+    '<button class="ca-tab" data-tab="annotations">주석 정리</button>' +
+    '<button class="ca-tab" data-tab="summary">AI 요약</button>' +
+    '<button class="ca-panel-resum" title="AI 요약 다시하기">🔄</button>' +
+    "</div>" +
     '<div class="ca-panel-body"></div>';
   document.documentElement.appendChild(panel);
   const panelBody = panel.querySelector(".ca-panel-body");
   let panelRaw = ""; // 복사용 원문(마크다운)
   let panelTitle = "";
   let panelIsMd = false;
-  let panelKind = ""; // "summary" | "text" | "annotations" — 패널 💾 가 무엇을 인쇄할지 분기
+  let panelKind = ""; // "summary" | "qa" | "text" | "annotations" — 패널 💾/🔄 분기
+  let summaryCache = null; // { sig, text } — 같은 주석이면 재요약 호출 안 함
   // 최소화/펼치기 — 헤더만 남기고 본문 접기
   const minBtn = panel.querySelector(".ca-panel-min");
   minBtn.addEventListener("click", () => {
     minBtn.textContent = panel.classList.toggle("ca-min") ? "▴" : "▾";
   });
-  panel.querySelector(".ca-panel-copy").addEventListener("click", () => copyPanel());
+  // 🔄 다시 요약 — 주석이 바뀌어 갱신하고 싶을 때 강제 재호출(요약 패널일 때만 보임)
+  const resumBtn = panel.querySelector(".ca-panel-resum");
+  resumBtn.addEventListener("click", () => aiSummarize(true));
+  const copyBtn = panel.querySelector(".ca-panel-copy");
+  copyBtn.addEventListener("click", () => copyPanel());
+
+  // 헤더 버튼·하위탭 가시성을 panelKind 에 맞춰 동기화
+  // 주석정리: `·↺ | 💾   /   AI요약: `·↺ | 🔄 | 📋·💾   /   qa: 📋·💾   /   text·notion: (없음)
+  const pdfBtn = panel.querySelector(".ca-panel-pdf");
+  const sep1 = panel.querySelector(".ca-sep1");
+  const tabBar = panel.querySelector(".ca-panel-tabs");
+  const tabBtns = panel.querySelectorAll(".ca-tab");
+  function syncPanelChrome() {
+    const k = panelKind;
+    const isAnn = k === "annotations";
+    const isSum = k === "summary";
+    const tabbed = isAnn || isSum;
+    const sh = (el, v) => (el.style.display = v ? "" : "none");
+    sh(markBtn, tabbed);
+    sh(clearmarkBtn, tabbed);
+    sh(sep1, tabbed);
+    sh(resumBtn, isSum); // 🔄 는 탭줄에 있고 AI 요약 탭일 때만 보임
+    sh(copyBtn, isSum || k === "qa");
+    sh(pdfBtn, tabbed || k === "qa");
+    sh(tabBar, tabbed);
+    tabBtns.forEach((b) => b.classList.toggle("active", b.dataset.tab === k));
+  }
+  tabBtns.forEach((b) => b.addEventListener("click", () => openPanelTab(b.dataset.tab)));
+
+  // 통합 패널 열기 — 하위탭 분기. AI 요약 탭은 누르면 바로 요약(캐시 있으면 캐시 표시).
+  function openPanelTab(tab) {
+    if (tab === "summary") aiSummarize();
+    else showAnnotationsPanel();
+  }
+  // 통합 버튼/단축키 — 같은 탭이 열려 있으면 닫고, 아니면 그 탭을 연다(토글).
+  function togglePanelTab(tab) {
+    const open = panel.style.display !== "none";
+    if (open && panelKind === tab) panel.style.display = "none";
+    else openPanelTab(tab);
+  }
   // 주석 정리 복사 — 패널 DOM 대신 '깨끗한 시맨틱 HTML'(h1/blockquote/img)과 마크다운 텍스트를 같이 실어
   // 각 앱이 알아서 고른다(Word=인용+이미지, Notion=인용 블록, 한글=텍스트). 이미지는 네모의 🖼 버튼으로 개별 복사.
   // 그 외(요약 등) 패널은 기존대로 마크다운/텍스트 복사.
@@ -194,7 +245,8 @@
   });
 
   // 빨강 표시 전체 해제
-  panel.querySelector(".ca-panel-clearmark").addEventListener("click", () => {
+  const clearmarkBtn = panel.querySelector(".ca-panel-clearmark");
+  clearmarkBtn.addEventListener("click", () => {
     panelBody.querySelectorAll("code.ca-mark").forEach(unwrapMark);
   });
 
@@ -240,13 +292,13 @@
   panelBody.addEventListener("scroll", () => {
     if (markDelTarget && markDel.style.display !== "none") placeMarkDel();
   });
-  function showPanel(title, text, isMd) {
+  function showPanel(title, text, isMd, kind) {
     panel.classList.remove("ca-min"); // 새 내용이 오면 펼침
     minBtn.textContent = "▾";
     panel.querySelector(".ca-panel-title").textContent = title;
     panelTitle = title;
     panelIsMd = !!isMd;
-    panelKind = isMd ? "summary" : "text";
+    panelKind = kind || (isMd ? "summary" : "text");
     panelRaw = text;
     if (isMd) {
       panelBody.style.whiteSpace = "normal";
@@ -256,6 +308,7 @@
       panelBody.textContent = text;
     }
     panel.style.display = "flex";
+    syncPanelChrome();
   }
 
   // 아웃라인 렌더러 — 모델이 쓴 번호/들여쓰기를 그대로 보존(사이트 CSS 영향 안 받음).
@@ -463,8 +516,7 @@
       toggleBar();
       return;
     }
-    if (btn.dataset.act === "summarize") return aiSummarize();
-    if (btn.dataset.act === "pdf") return showAnnotationsPanel();
+    if (btn.dataset.act === "panel") return togglePanelTab("annotations");
     if (btn.dataset.act === "notion") return exportNotion();
     if (btn.dataset.act === "off") return applyMode(null);
     if (btn.dataset.mode === "highlight" && mode !== "highlight") return activateHighlight();
@@ -476,39 +528,62 @@
     if (e.target.closest("button")) e.preventDefault();
   });
 
-  // 단축키: 1 형광펜, 2 네모, Esc 해제 (입력창·조합키 중이면 무시)
+  // 단축키: ` 도구막대 토글, Esc 모드 해제(모디파이어 없이) / Alt+1~5 기능
+  // (Alt 를 붙여 YouTube 등 사이트의 단일키 단축키와 안 겹치게 함)
   document.addEventListener("keydown", (e) => {
-    if (e.altKey || e.ctrlKey || e.metaKey) return; // 브라우저 조합키와 충돌 방지
+    if (e.ctrlKey || e.metaKey) return; // 브라우저 조합키와 충돌 방지
     const el = document.activeElement;
     const typing =
       el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
     if (typing) return;
-    if (e.key === "`") {
-      e.preventDefault();
-      toggleBar(); // 백틱: 도구막대 접기/펼치기
-    } else if (e.key === "1") {
-      e.preventDefault();
-      mode === "highlight" ? applyMode(null) : activateHighlight();
-    } else if (e.key === "2") {
-      e.preventDefault();
-      applyMode(mode === "rect" ? null : "rect");
-    } else if (e.key === "3") {
-      e.preventDefault();
-      showAnnotationsPanel();
-    } else if (e.key === "4") {
-      e.preventDefault();
-      exportNotion();
-    } else if (e.key === "5") {
-      e.preventDefault();
-      aiSummarize();
-    } else if (e.key === "Escape" && mode) {
-      applyMode(null);
+    if (!e.altKey) {
+      if (e.key === "`") {
+        e.preventDefault();
+        toggleBar(); // 백틱: 도구막대 접기/펼치기
+      } else if (e.key === "Escape" && mode) {
+        applyMode(null);
+      }
+      return;
+    }
+    // Alt + 숫자
+    switch (e.key) {
+      case "1":
+        e.preventDefault();
+        mode === "highlight" ? applyMode(null) : activateHighlight();
+        break;
+      case "2":
+        e.preventDefault();
+        applyMode(mode === "rect" ? null : "rect");
+        break;
+      case "3":
+        e.preventDefault();
+        togglePanelTab("annotations");
+        break;
+      case "4":
+        e.preventDefault();
+        exportNotion();
+        break;
+      case "5":
+        e.preventDefault();
+        togglePanelTab("summary");
+        break;
     }
   });
 
-  // 확장 아이콘 클릭 → 도구막대 토글
+  // 확장 아이콘 클릭 → 확장 UI 전체(툴바+패널+미니툴바) 표시/숨김 토글
+  let extHidden = false;
+  let panelDisplayBeforeHide = "none";
   chrome.runtime.onMessage.addListener((msg) => {
-    if (msg && msg.type === "toggle-toolbar") bar.classList.toggle("ca-hidden");
+    if (!msg || msg.type !== "toggle-toolbar") return;
+    extHidden = !extHidden;
+    bar.classList.toggle("ca-hidden", extHidden);
+    if (extHidden) {
+      panelDisplayBeforeHide = panel.style.display;
+      panel.style.display = "none";
+      tools.style.display = "none";
+    } else {
+      panel.style.display = panelDisplayBeforeHide;
+    }
   });
 
   // ---------- 형광펜 ----------
@@ -529,6 +604,7 @@
       wrapTextNode(node, start, end);
     });
     sel.removeAllRanges();
+    refreshAnnotationsPanel();
   }
 
   function getSelectedTextNodes(range) {
@@ -596,9 +672,13 @@
       dragEl.dataset.caId = id;
       const ann = { type: "rect", id, rect: box, image: null };
       annotations.push(ann);
+      refreshAnnotationsPanel(); // 네모 추가 즉시 반영(이미지는 캡처 후 한 번 더)
       // 그린 영역을 즉시(조용히) 캡처해 주석에 저장 (저장 버튼/AI에서 재사용)
       captureRegion(box)
-        .then((dataUrl) => (ann.image = dataUrl))
+        .then((dataUrl) => {
+          ann.image = dataUrl;
+          refreshAnnotationsPanel();
+        })
         .catch((err) => console.warn("[주석] 캡처 실패:", err));
     }
     dragEl = null;
@@ -734,6 +814,8 @@
     tools.style.display = "none";
     toolsTarget = null;
   });
+  // 전체삭제 — 개별삭제(✕) 옆에서 한 번에 정리(확인 1회). clearAllAnnotations 가 미니툴바도 닫음
+  btnDelAll.addEventListener("click", () => clearAllAnnotations());
   // 형광펜 문장(hover 한 span)을 텍스트로 복사
   btnCopyTxt.addEventListener("click", () => {
     if (!toolsTarget) return;
@@ -823,7 +905,7 @@
       },
       (resp) => {
         if (chrome.runtime.lastError) return showPanel(title, "오류: " + chrome.runtime.lastError.message, false);
-        if (resp && resp.ok) showPanel(title, resp.reply, true);
+        if (resp && resp.ok) showPanel(title, resp.reply, true, "qa");
         else showPanel(title, "실패: " + ((resp && resp.error) || "알 수 없음"), false);
       }
     );
@@ -835,16 +917,37 @@
     parent.removeChild(span);
     parent.normalize();
     dropAnnotation(span.dataset.caId);
+    refreshAnnotationsPanel();
   }
 
   function removeAnnotation(el) {
     dropAnnotation(el.dataset.caId);
     el.remove();
+    refreshAnnotationsPanel();
   }
 
   function dropAnnotation(id) {
     const i = annotations.findIndex((a) => a.id === id);
     if (i >= 0) annotations.splice(i, 1);
+  }
+
+  // 페이지의 형광펜·네모 주석을 한 번에 제거(확인 1회). 요약 패널·캐시는 건드리지 않는다.
+  // (드래그가 여러 문단으로 번져 형광펜이 N개로 쪼개졌을 때 하나씩 지우는 수고 방지)
+  function clearAllAnnotations() {
+    if (!annotations.length) return alert("지울 주석이 없습니다.");
+    if (!confirm("이 페이지의 형광펜·네모 주석을 모두 지울까요?")) return;
+    document.querySelectorAll("." + HL).forEach((span) => {
+      const parent = span.parentNode;
+      if (!parent) return;
+      while (span.firstChild) parent.insertBefore(span.firstChild, span);
+      parent.removeChild(span);
+      parent.normalize();
+    });
+    document.querySelectorAll(".ca-rect[data-ca-id]").forEach((el) => el.remove());
+    annotations.length = 0;
+    tools.style.display = "none"; // 떠 있던 hover 미니툴바 닫기
+    toolsTarget = null;
+    refreshAnnotationsPanel();
   }
 
   // ---------- 내보내기 ----------
@@ -898,16 +1001,19 @@
     );
   }
 
-  // 툴바 💾 → 텍스트 인용문 + 네모 캡처를 문서 순서대로 패널에 정리해 미리보기.
-  // 패널의 💾 를 누르면 exportPDF() 로 인쇄 — 인쇄 레이아웃(buildHTML)과 일치.
-  function showAnnotationsPanel() {
+  // 주석 정리 탭 본문 렌더 — 텍스트 인용문 + 네모 캡처를 문서 순서대로. (실시간 갱신에 재사용)
+  // blockquote/figure 같은 시맨틱 태그는 사이트(특히 다크 테마) CSS 가 타고 들어와 색을 덮으므로
+  // div + 명시 색상(!important)으로 렌더 — 패널은 페이지 DOM 에 주입돼 사이트 CSS 영향을 받는다.
+  function renderAnnotationsBody() {
     const items = collectSorted();
-    if (!items.length) return alert("정리할 주석이 없습니다. 형광펜이나 네모를 먼저 추가하세요.");
+    if (!items.length) {
+      panelBody.innerHTML =
+        '<div style="color:#888;padding:4px;font-size:13px">아직 주석이 없습니다. 형광펜이나 네모를 추가하면 여기에 실시간으로 정리됩니다.</div>';
+      return;
+    }
     const esc = (s) =>
       String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
-    // blockquote/figure 같은 시맨틱 태그는 사이트(특히 다크 테마) CSS 가 타고 들어와 색을 덮으므로
-    // div + 명시 색상(!important)으로 렌더 — 패널은 페이지 DOM 에 주입돼 사이트 CSS 영향을 받는다.
-    const html = items
+    panelBody.innerHTML = items
       .map((it) =>
         it.type === "highlight"
           ? '<div style="border-left:3px solid #ff7f50;background:#fff5f0!important;color:#222!important;' +
@@ -915,9 +1021,13 @@
           : it.image
           ? '<div style="margin:10px 0"><img src="' + it.image +
             '" style="max-width:100%;border:1px solid #ddd;border-radius:4px"></div>'
-          : ""
+          : '<div style="color:#888;margin:8px 0;font-size:13px">[네모 캡처 중…]</div>'
       )
       .join("");
+  }
+
+  // 주석 정리 탭 열기 — 주석이 없어도 빈 안내로 열린다.
+  function showAnnotationsPanel() {
     panel.classList.remove("ca-min");
     minBtn.textContent = "▾";
     panel.querySelector(".ca-panel-title").textContent = "주석 정리";
@@ -926,8 +1036,14 @@
     panelKind = "annotations";
     panelRaw = "";
     panelBody.style.whiteSpace = "normal";
-    panelBody.innerHTML = html;
+    renderAnnotationsBody();
     panel.style.display = "flex";
+    syncPanelChrome();
+  }
+
+  // 형광펜·네모가 추가/삭제/캡처될 때 주석 탭이 열려 있으면 즉시 다시 그린다(실시간 반영)
+  function refreshAnnotationsPanel() {
+    if (panel.style.display !== "none" && panelKind === "annotations") renderAnnotationsBody();
   }
 
   function exportPDF() {
@@ -958,6 +1074,8 @@
     const w = window.open("", "_blank");
     if (!w) return alert("팝업이 차단되었습니다. 이 사이트의 팝업을 허용해주세요.");
     const css =
+      // 새 창에도 콘텐츠 스크립트가 주입돼 툴바/패널이 보일 수 있으므로 숨김(buildHTML 과 동일)
+      ".ca-toolbar,.ca-tools,.ca-menu,.ca-panel,.ca-modefx{display:none!important}" +
       "*{-webkit-print-color-adjust:exact;print-color-adjust:exact}" + // 인쇄에 배경색(코랄 등) 유지
       'body{font-family:-apple-system,"Malgun Gothic",sans-serif;max-width:720px;margin:32px auto;padding:0 16px;color:#222;line-height:1.6}' +
       "h1{font-size:18px}.src{color:#888;font-size:12px;margin-bottom:20px;word-break:break-all}" +
@@ -985,10 +1103,19 @@
   }
 
   // ---------- AI 요약 (형광펜 + 네모 캡처 종합) ----------
-  async function aiSummarize() {
+  // force=true(🔄 버튼)면 캐시 무시하고 무조건 재호출. 평소 🤖/단축키는 캐시를 보여준다
+  // (주석이 그대로면 재요약 안 함 — 바뀌었으면 제목에 '갱신 필요' 표시하고 🔄 유도).
+  async function aiSummarize(force) {
     const items = collectSorted();
     const quotes = items.filter((it) => it.type === "highlight").map((it) => it.text);
     const rects = items.filter((it) => it.type === "rect" && it.image);
+    // 주석 시그니처 — 네모는 캡처 이미지 길이로 변화 감지(저렴한 프록시)
+    const sig = quotes.join("|") + "##" + rects.map((r) => (r.image || "").length).join(",");
+    if (!force && summaryCache) {
+      const stale = summaryCache.sig !== sig;
+      showPanel(stale ? "요약 (주석 변경됨 — 🔄로 갱신)" : "요약", summaryCache.text, true, "summary");
+      return;
+    }
     const { gw_model } = await chrome.storage.local.get("gw_model");
     const model = gw_model || "gemini-2.5-flash";
     const pageText = (document.body.innerText || "").slice(0, 8000);
@@ -1018,13 +1145,15 @@
           rects.map((r) => ({ type: "image_url", image_url: { url: r.image } }))
         )
       : prompt;
-    showPanel("요약", "요약 중…", false);
+    showPanel("요약", "요약 중…", false, "summary");
     chrome.runtime.sendMessage(
       { type: "gw-chat", body: { model, messages: [{ role: "user", content }] } },
       (resp) => {
         if (chrome.runtime.lastError) return showPanel("요약", "오류: " + chrome.runtime.lastError.message, false);
-        if (resp && resp.ok) showPanel("요약", resp.reply, true);
-        else showPanel("요약", "실패: " + ((resp && resp.error) || "알 수 없음"), false);
+        if (resp && resp.ok) {
+          summaryCache = { sig, text: resp.reply };
+          showPanel("요약", resp.reply, true, "summary");
+        } else showPanel("요약", "실패: " + ((resp && resp.error) || "알 수 없음"), false);
       }
     );
   }
@@ -1052,7 +1181,8 @@
     if (!notion_token || !notion_parent_id) {
       return alert("Notion 토큰/부모 페이지가 설정되지 않았습니다. 확장 옵션에서 입력하세요.");
     }
-    const items = collectSorted()
+    const sorted = collectSorted();
+    const items = sorted
       .map((it) =>
         it.type === "highlight"
           ? { kind: "quote", text: it.text }
@@ -1061,7 +1191,13 @@
           : null
       )
       .filter(Boolean);
-    const summary = collectSummaryForNotion();
+    const hlCount = sorted.filter((it) => it.type === "highlight").length;
+    const rectCount = sorted.filter((it) => it.type === "rect" && it.image).length;
+    let summary = collectSummaryForNotion();
+    // 요약이 떠 있으면 같이 보낼지 물어본다(없으면 조용히 건너뜀)
+    if (summary && !confirm("AI 요약도 같이 Notion에 보낼까요?\n취소하면 주석만 보냅니다.")) {
+      summary = null;
+    }
     if (!items.length && !summary) return alert("내보낼 주석이나 요약이 없습니다.");
     showPanel("Notion", "Notion에 저장 중…", false);
     chrome.runtime.sendMessage(
@@ -1072,6 +1208,8 @@
         url: location.href,
         items,
         summary,
+        hlCount,
+        rectCount,
       },
       (resp) => {
         if (chrome.runtime.lastError)

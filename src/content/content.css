@@ -76,6 +76,13 @@
   color: #c0392b;
   font-weight: 600;
 }
+/* 도구 그룹 구분선 (형광펜·네모 | 정리·AI | Notion) */
+.ca-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 4px 2px;
+  background: #e3e3e3;
+}
 
 /* 주석 위 hover 시 뜨는 미니 툴바 (저장/삭제) */
 .ca-tools {
@@ -254,12 +261,60 @@
 .ca-panel.ca-min .ca-panel-head {
   border-bottom: none;
 }
-/* 최소화 시 도구 버튼도 숨겨 일반 도구막대처럼 핸들만 남김(⠿ 제목 ▴) */
+/* 최소화 시 도구 버튼·하위탭도 숨겨 일반 도구막대처럼 핸들만 남김(⠿ 제목 ▴) */
 .ca-panel.ca-min .ca-panel-mark,
 .ca-panel.ca-min .ca-panel-clearmark,
+.ca-panel.ca-min .ca-panel-resum,
 .ca-panel.ca-min .ca-panel-pdf,
-.ca-panel.ca-min .ca-panel-copy {
-  display: none;
+.ca-panel.ca-min .ca-panel-copy,
+.ca-panel.ca-min .ca-panel-sep,
+.ca-panel.ca-min .ca-panel-tabs {
+  display: none !important;
+}
+/* 패널 헤더 구분선 (` ↺ | 🔄 | 📋 💾) */
+.ca-panel-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 3px 1px;
+  background: #e3e3e3;
+}
+/* 하위탭 (주석 정리 / AI 요약) */
+.ca-panel-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 6px 10px;
+  border-bottom: 1px solid #eee;
+}
+.ca-panel-tabs .ca-tab {
+  all: unset;
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #666;
+  cursor: pointer !important;
+}
+.ca-panel-tabs .ca-tab:hover {
+  background: #f1f1f1;
+}
+.ca-panel-tabs .ca-tab.active {
+  background: #ffe2d8;
+  color: #c0392b;
+  font-weight: 600;
+}
+/* 탭줄의 🔄 다시 요약 (AI 요약 탭 오른쪽) */
+.ca-panel-tabs .ca-panel-resum {
+  all: unset;
+  width: 26px;
+  height: 26px;
+  line-height: 26px;
+  text-align: center;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #666;
+  cursor: pointer !important;
+}
+.ca-panel-tabs .ca-panel-resum:hover {
+  background: #f1f1f1;
 }
 .ca-panel-head button {
   all: unset;
