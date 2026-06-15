@@ -105,20 +105,71 @@ document.getElementById("notion-save").addEventListener("click", async () => {
   setNotionStatus("저장됨.", "ok");
 });
 
+const notionDbSelectEl = document.getElementById("notion-db-select");
+const notionDbPickEl = document.getElementById("notion-db-pick");
+
+function hideDbPicker() {
+  notionDbSelectEl.style.display = "none";
+  notionDbPickEl.style.display = "none";
+  notionDbSelectEl.innerHTML = "";
+}
+
 document.getElementById("notion-test").addEventListener("click", async () => {
   await persistNotion();
+  hideDbPicker();
   if (!notionTokenEl.value.trim() || !notionParentEl.value.trim()) {
     return setNotionStatus("토큰과 부모 페이지를 먼저 입력하세요.", "err");
   }
-  setNotionStatus("테스트 중…", "");
+  setNotionStatus("확인 중…", "");
   chrome.runtime.sendMessage(
-    { type: "notion-test", parentId: notionParentEl.value.trim() },
+    { type: "notion-connect", parentId: notionParentEl.value.trim() },
     (resp) => {
       if (chrome.runtime.lastError) {
         return setNotionStatus("오류: " + chrome.runtime.lastError.message, "err");
       }
-      if (resp && resp.ok) setNotionStatus('연결 성공 ✓  부모 페이지: "' + resp.title + '"', "ok");
-      else setNotionStatus("실패: " + ((resp && resp.error) || "알 수 없음"), "err");
+      if (!resp || !resp.ok) {
+        return setNotionStatus("실패: " + ((resp && resp.error) || "알 수 없음"), "err");
+      }
+      const base = '연결 성공 ✓  부모 페이지: "' + resp.title + '"';
+      const db = resp.db || {};
+      if (db.status === "single") {
+        setNotionStatus(base + " — 기존 인박스 DB에 연결됨.", "ok");
+      } else if (db.status === "none") {
+        setNotionStatus(base + " — 저장 시 인박스 DB가 새로 생성됩니다.", "ok");
+      } else if (db.status === "multiple") {
+        setNotionStatus(base + " — 인박스 DB가 여러 개입니다. 사용할 DB를 선택하세요.", "err");
+        for (const c of db.candidates || []) {
+          const when = c.created ? new Date(c.created).toLocaleString() : "";
+          const shortId = String(c.id).replace(/-/g, "").slice(0, 8);
+          notionDbSelectEl.add(
+            new Option(c.title + " — 생성 " + when + " (" + shortId + "…)", c.id)
+          );
+        }
+        notionDbSelectEl.style.display = "block";
+        notionDbPickEl.style.display = "inline-block";
+      } else {
+        setNotionStatus(base, "ok");
+      }
+    }
+  );
+});
+
+notionDbPickEl.addEventListener("click", () => {
+  const databaseId = notionDbSelectEl.value;
+  if (!databaseId) return;
+  setNotionStatus("연결 중…", "");
+  chrome.runtime.sendMessage(
+    { type: "notion-pick-db", parentId: notionParentEl.value.trim(), databaseId },
+    (resp) => {
+      if (chrome.runtime.lastError) {
+        return setNotionStatus("오류: " + chrome.runtime.lastError.message, "err");
+      }
+      if (resp && resp.ok) {
+        hideDbPicker();
+        setNotionStatus("선택한 DB에 연결됨 ✓", "ok");
+      } else {
+        setNotionStatus("실패: " + ((resp && resp.error) || "알 수 없음"), "err");
+      }
     }
   );
 });

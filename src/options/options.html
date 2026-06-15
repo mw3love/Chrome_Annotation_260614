@@ -76,7 +76,8 @@
     <div class="hint">
       저장할 Notion 페이지를 열고 ··· → '연결(Connections)'에서 위 통합을 추가한 뒤, 그 페이지
       URL이나 ID를 입력하세요. 첫 내보내기 때 이 페이지 아래에 인박스 DB가 한 번 자동 생성되고,
-      이후 저장은 그 DB에 행으로 쌓입니다.
+      이후 저장은 그 DB에 행으로 쌓입니다. 다른 PC에서도 같은 부모 페이지를 입력하면 그 인박스
+      DB를 찾아 같은 DB에 연결됩니다(연결 테스트로 확인).
     </div>
 
     <div class="row">
@@ -84,6 +85,16 @@
       <button id="notion-test" class="secondary">Notion 연결 테스트</button>
     </div>
     <div id="notion-status"></div>
+
+    <!-- 인박스 DB 가 2개 이상일 때만 표시되는 선택 UI -->
+    <select id="notion-db-select" style="display: none; margin-top: 10px"></select>
+    <button
+      id="notion-db-pick"
+      class="secondary"
+      style="display: none; margin-top: 10px; width: auto"
+    >
+      이 DB 사용
+    </button>
 
     <script src="options.js"></script>
   </body>

@@ -49,6 +49,8 @@ options.html / options.js               # API 키 입력
   - 검증: 📝 Notion 버튼 → 부모 페이지 아래 DB에 행 생성, 주석·이미지·속성 저장 (실조건 확인)
 - [x] **6. UI/UX 개편 (0.3.0)** — '정리·AI' 통합 패널(하위탭: 주석 정리 / AI 요약), 주석 정리 실시간 반영, AI 요약 결과 캐시 + 🔄 다시하기, 전체삭제를 hover 미니툴바로 통합, 단축키 Alt+1~5(백틱=툴바 토글)
   - 검증: 통합 패널 토글·실시간 반영·캐시 동작, 주석정리 순서 == Notion 본문 순서
+- [~] **7. 다중 PC 같은 DB 연결 (0.3.1)** — DB 확보 시 로컬 캐시 없으면 부모 페이지에서 기존 인박스 DB(제목 매칭)를 탐색해 0개=생성/1개=재사용/2개+=옵션 페이지에서 선택. 다른 PC도 같은 부모 페이지 ID 면 같은 DB 에 연결됨(로컬 캐시 비의존).
+  - 검증: 신규생성 경로 실조건 확인(현재 PC). **재사용 경로(2번째 PC) 미검증** — 2026-06-15 저녁 예정.
 
 ## 게이트웨이 메모 (2026-06-13 실측)
 
@@ -60,7 +62,8 @@ options.html / options.js               # API 키 입력
 
 - API 호출은 전부 background worker 에서 (`api.notion.com` host_permissions 추가) → CORS 우회. Notion API 는 CORS 헤더 미제공이라 콘텐츠 스크립트 직접 호출 불가.
 - 헤더: `Notion-Version: 2026-03-11`. 인증: 옵션 페이지에 통합 토큰 + 부모 페이지(통합과 Connections 공유 필요) 입력.
-- **인박스 DB**: 첫 내보내기 때 부모 페이지 아래 DB 1회 자동 생성(`POST /databases` + `initial_data_source`), 응답의 `data_sources[0].id` 를 저장·재사용. 이후 저장은 행 생성(`parent.data_source_id` — 2025-09-03+ 부터 행 부모는 database_id 가 아니라 data_source_id). 속성: 제목·URL·저장일·분류(기본 미분류)·하이라이트·네모·요약포함. 본문은 주석을 위치순 인터리브 + AI요약(선택)만 두고, URL·네모수는 속성에만(중복 제거). 부모 페이지가 바뀌면 새 DB 생성.
+- **인박스 DB**: 첫 내보내기 때 부모 페이지 아래 DB 1회 자동 생성(`POST /databases` + `initial_data_source`), 응답의 `data_sources[0].id` 를 저장·재사용. 이후 저장은 행 생성(`parent.data_source_id` — 2025-09-03+ 부터 행 부모는 database_id 가 아니라 data_source_id). 속성: 제목·URL·저장일·분류(기본 미분류)·하이라이트·네모·요약포함. 본문은 주석을 위치순 인터리브 + AI요약(선택)만 두고, URL·네모수는 속성에만(중복 제거).
+- **DB 확보·다중 PC 연결 (0.3.1)**: 로컬 캐시(`notion_data_source_id`+`notion_db_parent`) 우선 → 없으면 부모 페이지의 `child_database` 블록 중 제목 `Reading Highlighter 인박스` 매칭으로 탐색해 **0개=생성 / 1개=재사용+캐시 / 2개+=옵션 페이지에서 선택**(`notion-connect`/`notion-pick-db`). 덕분에 다른 PC도 같은 부모 페이지 ID 면 같은 DB 에 연결(로컬 캐시 비의존). 부모 페이지가 바뀌면 그 페이지 기준으로 다시 탐색.
 - 부모 페이지 ID 는 URL 맨 끝 32자리 hex(끝에서부터 추출) — 슬러그의 날짜 등 hex-유사 숫자가 ID 앞에 붙는 함정 주의. `?v=뷰ID` 쿼리도 먼저 제거.
 - 이미지: File Upload API 3단계(`POST /file_uploads` → `/send` 멀티파트 → image 블록의 `file_upload.id`). 페이지 children 은 요청당 100개 제한 → 초과분 PATCH append.
 - **클립보드 제약**: 붙여넣기(Ctrl+V)는 수동적이라 업로드를 못 일으킨다. Notion·한글은 클립보드 HTML 의 data-URI 이미지를 버림(Word만 받음). → 이미지를 두 앱에 넣으려면 실제 PNG(image/png) 클립보드(네모의 🖼 버튼, 1장씩) 또는 Notion API 업로드(📝 버튼)뿐.

@@ -144,10 +144,75 @@ function notionDbSchema() {
   };
 }
 
-// 부모 페이지 밑에 인박스 DB 를 1회 생성하고 data_source_id 를 저장·재사용.
-// 2025-09-03+ 버전부터 행(페이지) 부모는 database_id 가 아니라 data_source_id 다.
-// data_source_id 는 DB 생성 응답의 data_sources[0].id 로 바로 얻는다(별도 GET 불필요).
-// 부모 페이지가 바뀌면(옵션 변경) 새 DB 를 만든다.
+// 확장이 만드는 인박스 DB 의 제목 — 이 제목으로 부모 페이지 안의 기존 DB 를 찾아
+// 여러 PC(브라우저)가 같은 부모 페이지를 가리키면 같은 DB 에 연결되게 한다(로컬 캐시 비의존).
+const NOTION_INBOX_TITLE = "Reading Highlighter 인박스";
+
+// 부모 페이지의 자식 블록을 훑어 child_database 만 추출(100개 초과는 페이지네이션).
+async function notionListChildDatabases(parentKey) {
+  const out = [];
+  let cursor = null;
+  do {
+    const qs = "?page_size=100" + (cursor ? "&start_cursor=" + cursor : "");
+    const res = await notionFetch("/blocks/" + parentKey + "/children" + qs, {
+      headers: await notionHeaders(),
+    });
+    for (const b of res.results || []) {
+      if (b.type === "child_database")
+        out.push({
+          id: b.id,
+          title: (b.child_database && b.child_database.title) || "",
+          created: b.created_time || "",
+        });
+    }
+    cursor = res.has_more ? res.next_cursor : null;
+  } while (cursor);
+  return out;
+}
+
+// 제목이 인박스 DB 와 정확히 일치하는 것만(다른 제목 DB 는 무시)
+async function notionFindInboxDatabases(parentKey) {
+  const all = await notionListChildDatabases(parentKey);
+  return all.filter((d) => d.title === NOTION_INBOX_TITLE);
+}
+
+// database_id → data_source_id (2025-09-03+ 버전부터 행 부모는 data_source_id)
+async function notionDataSourceIdOf(databaseId) {
+  const db = await notionFetch("/databases/" + databaseId, {
+    headers: await notionHeaders(),
+  });
+  const dsId = db.data_sources && db.data_sources[0] && db.data_sources[0].id;
+  if (!dsId) throw new Error("DB 에 data_source 가 없습니다: " + databaseId);
+  return dsId;
+}
+
+// 부모 페이지 밑에 인박스 DB 를 새로 생성하고 {databaseId, dataSourceId} 반환
+async function notionCreateInboxDatabase(parentKey) {
+  const db = await notionFetch("/databases", {
+    method: "POST",
+    headers: await notionHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({
+      parent: { type: "page_id", page_id: parentKey },
+      title: notionRich(NOTION_INBOX_TITLE),
+      initial_data_source: { properties: notionDbSchema() },
+    }),
+  });
+  const dsId = db.data_sources && db.data_sources[0] && db.data_sources[0].id;
+  if (!dsId) throw new Error("DB 생성 응답에 data_source 가 없습니다.");
+  return { databaseId: db.id, dataSourceId: dsId };
+}
+
+// 확보한 DB 를 로컬 캐시에 기록(다음부터 fast-path)
+async function notionCacheDb(parentKey, databaseId, dataSourceId) {
+  await chrome.storage.local.set({
+    notion_db_id: databaseId,
+    notion_data_source_id: dataSourceId,
+    notion_db_parent: parentKey,
+  });
+}
+
+// 내보내기용 DB 확보 — 로컬 캐시 우선, 없으면 부모 페이지에서 기존 인박스 DB 탐색.
+// 0개=새로 생성 / 1개=재사용 / 2개 이상=모호 → 옵션 화면에서 선택하도록 에러로 안내.
 async function notionGetOrCreateDatabase(parentId) {
   const parentKey = normNotionId(parentId);
   const saved = await chrome.storage.local.get([
@@ -156,23 +221,22 @@ async function notionGetOrCreateDatabase(parentId) {
   ]);
   if (saved.notion_data_source_id && saved.notion_db_parent === parentKey)
     return saved.notion_data_source_id;
-  const db = await notionFetch("/databases", {
-    method: "POST",
-    headers: await notionHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({
-      parent: { type: "page_id", page_id: parentKey },
-      title: notionRich("Reading Highlighter 인박스"),
-      initial_data_source: { properties: notionDbSchema() },
-    }),
-  });
-  const dsId = db.data_sources && db.data_sources[0] && db.data_sources[0].id;
-  if (!dsId) throw new Error("DB 생성 응답에 data_source 가 없습니다.");
-  await chrome.storage.local.set({
-    notion_db_id: db.id,
-    notion_data_source_id: dsId,
-    notion_db_parent: parentKey,
-  });
-  return dsId;
+
+  const found = await notionFindInboxDatabases(parentKey);
+  if (found.length === 1) {
+    const dsId = await notionDataSourceIdOf(found[0].id);
+    await notionCacheDb(parentKey, found[0].id, dsId);
+    return dsId;
+  }
+  if (found.length === 0) {
+    const { databaseId, dataSourceId } = await notionCreateInboxDatabase(parentKey);
+    await notionCacheDb(parentKey, databaseId, dataSourceId);
+    return dataSourceId;
+  }
+  throw new Error(
+    "이 부모 페이지에 '" + NOTION_INBOX_TITLE + "' DB 가 " + found.length +
+      "개 있습니다. 확장 옵션의 'Notion 연결 테스트'에서 사용할 DB 를 선택하세요."
+  );
 }
 
 // 행 속성 — notionDbSchema 의 키와 정확히 일치해야 함.
@@ -223,6 +287,28 @@ async function notionTest(parentId) {
   return title;
 }
 
+// 옵션 페이지용: 부모 페이지 접근 확인 + 인박스 DB 상태 해석.
+// none=아직 없음(저장 시 생성) / single=기존 1개 자동 연결(캐시 저장) / multiple=여러 개(선택 필요)
+async function notionConnect(parentId) {
+  const parentKey = normNotionId(parentId);
+  const title = await notionTest(parentId); // 부모 페이지 접근·제목 확인
+  const found = await notionFindInboxDatabases(parentKey);
+  if (found.length === 1) {
+    const dsId = await notionDataSourceIdOf(found[0].id);
+    await notionCacheDb(parentKey, found[0].id, dsId);
+    return { title, db: { status: "single" } };
+  }
+  if (found.length === 0) return { title, db: { status: "none" } };
+  return { title, db: { status: "multiple", candidates: found } };
+}
+
+// 옵션 페이지용: 모호(2개+)할 때 사용자가 고른 DB 를 캐시에 확정
+async function notionPickDatabase(parentId, databaseId) {
+  const parentKey = normNotionId(parentId);
+  const dsId = await notionDataSourceIdOf(databaseId);
+  await notionCacheDb(parentKey, databaseId, dsId);
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!msg) return;
 
@@ -263,10 +349,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
 
-  // 옵션 페이지: Notion 연결 테스트(토큰 + 부모 페이지 공유 확인)
-  if (msg.type === "notion-test") {
-    notionTest(msg.parentId)
-      .then((title) => sendResponse({ ok: true, title }))
+  // 옵션 페이지: Notion 연결 테스트(토큰·부모 페이지 확인 + 인박스 DB 상태 해석)
+  if (msg.type === "notion-connect") {
+    notionConnect(msg.parentId)
+      .then((r) => sendResponse({ ok: true, title: r.title, db: r.db }))
+      .catch((e) => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
+
+  // 옵션 페이지: 인박스 DB 가 여러 개일 때 사용자가 고른 DB 확정
+  if (msg.type === "notion-pick-db") {
+    notionPickDatabase(msg.parentId, msg.databaseId)
+      .then(() => sendResponse({ ok: true }))
       .catch((e) => sendResponse({ ok: false, error: e.message }));
     return true;
   }
