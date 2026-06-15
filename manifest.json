@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Reading Highlighter",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "긴 글을 형광펜 치며 읽는 주석 도구 (코랄 하이라이트 + 네모 캡처)",
   "permissions": ["activeTab", "tabs", "storage"],
   "host_permissions": [

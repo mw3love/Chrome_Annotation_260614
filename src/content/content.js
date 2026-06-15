@@ -36,7 +36,7 @@
   document.documentElement.appendChild(modeFx);
   document.documentElement.appendChild(bar);
 
-  // 주석 hover 시 뜨는 미니 툴바 — 네모는 [💾 저장][✕ 삭제], 형광펜은 [✕ 삭제]
+  // 주석 hover 시 뜨는 미니 툴바 — 네모는 [🤖][🖼][✕], 형광펜은 [🤖][📋][✕] (전체삭제는 정리 탭 헤더로 이동)
   const tools = document.createElement("div");
   tools.className = "ca-tools";
   tools.style.display = "none";
@@ -56,11 +56,7 @@
   btnDel.className = "ca-tool ca-tool-del";
   btnDel.textContent = "✕";
   btnDel.title = "이 주석만 삭제";
-  const btnDelAll = document.createElement("button"); // 전체삭제 — 개별삭제 옆에 통합
-  btnDelAll.className = "ca-tool ca-tool-del";
-  btnDelAll.textContent = "🗑";
-  btnDelAll.title = "이 페이지 주석 전체 삭제";
-  tools.append(btnAsk, btnCopyTxt, btnCopyImg, btnDel, btnDelAll);
+  tools.append(btnAsk, btnCopyTxt, btnCopyImg, btnDel);
   document.documentElement.appendChild(tools);
 
   // AI 결과 표시 패널
@@ -68,7 +64,7 @@
   panel.className = "ca-panel";
   panel.style.display = "none";
   panel.innerHTML =
-    '<div class="ca-panel-head"><span class="ca-panel-grip" title="드래그해 이동">⠿</span>' +
+    '<div class="ca-panel-head">' +
     '<span class="ca-panel-title">정리·AI</span>' +
     '<button class="ca-panel-mark" title="선택한 글자를 빨강 표시(토글). 단축키 ~ (Shift+백틱)">`<span class="ca-mark-a">A</span>`</button>' +
     '<button class="ca-panel-clearmark" title="빨강 표시 모두 해제">↺</button>' +
@@ -80,15 +76,40 @@
     '<button class="ca-tab" data-tab="annotations">주석 정리</button>' +
     '<button class="ca-tab" data-tab="summary">AI 요약</button>' +
     '<button class="ca-panel-resum" title="AI 요약 다시하기">🔄</button>' +
+    '<button class="ca-panel-clearall" title="이 페이지 주석 전체 삭제">🗑 전체삭제</button>' +
     "</div>" +
     '<div class="ca-panel-body"></div>';
   document.documentElement.appendChild(panel);
   const panelBody = panel.querySelector(".ca-panel-body");
+  // 주석 정리 탭의 항목별 ✕ 삭제 — 이벤트 위임(렌더 때마다 다시 거는 일 없이 한 번만)
+  panelBody.addEventListener("click", (e) => {
+    const b = e.target.closest(".ca-anno-del");
+    if (b) deleteAnnotationById(b.getAttribute("data-ca-del"));
+  });
   let panelRaw = ""; // 복사용 원문(마크다운)
   let panelTitle = "";
   let panelIsMd = false;
   let panelKind = ""; // "summary" | "qa" | "text" | "annotations" — 패널 💾/🔄 분기
   let summaryCache = null; // { sig, text } — 같은 주석이면 재요약 호출 안 함
+
+  // 패널을 도구막대와 한 몸으로 유지. panelPos 는 패널의 viewport 좌표를 숨겨져 있어도 추적한다
+  // (display:none 이면 getBoundingClientRect 가 0 이라 직접 못 읽으므로). 표시할 때 이 위치로 복원.
+  let panelPos = null; // {top, left}
+  // 패널을 표시할 때 도구막대 바로 아래·같은 가로폭·좌측 정렬로 맞춰 '한 몸'처럼 보이게 한다.
+  // (도구막대가 접혀 있으면 폭/좌측 정렬은 생략하고 추적 위치만 복원.)
+  function applyPanelPos() {
+    const collapsed = bar.classList.contains("ca-bar-collapsed");
+    const br = bar.getBoundingClientRect();
+    if (!panelPos) panelPos = { top: br.bottom + 8, left: br.left }; // 최초: 도구막대 바로 아래
+    if (!collapsed) {
+      panel.style.width = br.width + "px"; // 가로폭 = 도구막대 폭(패널만 넓어짐)
+      panelPos.left = br.left; // 좌측 정렬 → 좌·우변 모두 도구막대와 일치
+    }
+    panel.style.bottom = "auto";
+    panel.style.right = "auto";
+    panel.style.top = panelPos.top + "px";
+    panel.style.left = panelPos.left + "px";
+  }
   // 최소화/펼치기 — 헤더만 남기고 본문 접기
   const minBtn = panel.querySelector(".ca-panel-min");
   minBtn.addEventListener("click", () => {
@@ -97,6 +118,9 @@
   // 🔄 다시 요약 — 주석이 바뀌어 갱신하고 싶을 때 강제 재호출(요약 패널일 때만 보임)
   const resumBtn = panel.querySelector(".ca-panel-resum");
   resumBtn.addEventListener("click", () => aiSummarize(true));
+  // 🗑 전체삭제 — 탭줄 오른쪽(주석 정리 탭일 때만 보임). 미니툴바에서 이리로 이동.
+  const clearAllBtn = panel.querySelector(".ca-panel-clearall");
+  clearAllBtn.addEventListener("click", () => clearAllAnnotations());
   const copyBtn = panel.querySelector(".ca-panel-copy");
   copyBtn.addEventListener("click", () => copyPanel());
 
@@ -116,6 +140,7 @@
     sh(clearmarkBtn, tabbed);
     sh(sep1, tabbed);
     sh(resumBtn, isSum); // 🔄 는 탭줄에 있고 AI 요약 탭일 때만 보임
+    sh(clearAllBtn, isAnn); // 🗑 전체삭제는 주석 정리 탭일 때만 보임
     sh(copyBtn, isSum || k === "qa");
     sh(pdfBtn, tabbed || k === "qa");
     sh(tabBar, tabbed);
@@ -176,36 +201,74 @@
   // Pointer Capture 사용 — 페이지에 광고 iframe이 많아도 포인터 이벤트를 핸들이 독점해
   // 커서가 iframe 위를 지나도 드래그가 끊기지 않는다(mousemove 방식의 한계 회피).
   // rightAnchored=true 면 left 대신 right 로 위치를 잡는다(도구막대용 — 접힘이 항상 왼쪽으로 자라게).
-  function makeDraggable(target, handle, rightAnchored) {
-    let dx = 0;
-    let dy = 0;
+  // linked: 함께 끌려오는 요소(왼쪽 기준). 보일 때만 같은 픽셀 델타로 따라 움직인다.
+  function makeDraggable(target, handle, rightAnchored, linked) {
+    let sx = 0; // 포인터 시작 좌표
+    let sy = 0;
+    let tTop0 = 0; // 드래그 시작 시 target 위치
+    let tLeft0 = 0;
+    let tRight0 = 0;
+    let offX = 0; // linked(패널)의 target(도구막대) 대비 고정 오프셋
+    let offY = 0;
+    let linkActive = false;
     let dragging = false;
     handle.addEventListener("pointerdown", (e) => {
       if (e.button !== 0 || e.target.closest("button")) return; // 버튼 클릭 제외
       const r = target.getBoundingClientRect();
-      dx = e.clientX - r.left;
-      dy = e.clientY - r.top;
+      sx = e.clientX;
+      sy = e.clientY;
+      tTop0 = r.top;
       dragging = true;
       target.style.bottom = "auto";
       target.style.top = r.top + "px";
       if (rightAnchored) {
+        tRight0 = window.innerWidth - r.right;
         target.style.left = "auto";
-        target.style.right = window.innerWidth - r.right + "px";
+        target.style.right = tRight0 + "px";
       } else {
+        tLeft0 = r.left;
         target.style.right = "auto";
         target.style.left = r.left + "px";
+      }
+      // 패널은 도구막대 대비 '고정 오프셋'으로 따라온다(숨겨져 있어도). 위치를 도구막대 실제
+      // 위치에서 매번 다시 계산하므로 좌/우 기준 차이로 인한 어긋남(드리프트)이 누적되지 않는다.
+      linkActive = false;
+      if (linked) {
+        if (!panelPos && linked.style.display !== "none") {
+          const lr = linked.getBoundingClientRect();
+          panelPos = { top: lr.top, left: lr.left };
+        }
+        if (panelPos) {
+          linkActive = true;
+          offX = panelPos.left - r.left; // r = 도구막대 시작 rect
+          offY = panelPos.top - r.top;
+        }
       }
       handle.setPointerCapture(e.pointerId);
       e.preventDefault();
     });
     handle.addEventListener("pointermove", (e) => {
       if (!dragging) return;
-      target.style.top = Math.max(0, Math.min(window.innerHeight - 30, e.clientY - dy)) + "px";
+      const ddx = e.clientX - sx;
+      const ddy = e.clientY - sy;
+      target.style.top = Math.max(0, Math.min(window.innerHeight - 30, tTop0 + ddy)) + "px";
       if (rightAnchored) {
-        const right = window.innerWidth - (e.clientX - dx) - target.offsetWidth;
-        target.style.right = Math.max(0, Math.min(window.innerWidth - 40, right)) + "px";
+        target.style.right = Math.max(0, Math.min(window.innerWidth - 40, tRight0 - ddx)) + "px";
       } else {
-        target.style.left = Math.max(0, Math.min(window.innerWidth - 40, e.clientX - dx)) + "px";
+        target.style.left = Math.max(0, Math.min(window.innerWidth - 40, tLeft0 + ddx)) + "px";
+      }
+      if (linkActive) {
+        const br = target.getBoundingClientRect(); // 도구막대의 '실제' 위치(clamp 반영) + 오프셋
+        const nt = br.top + offY;
+        const nl = br.left + offX;
+        panelPos.top = nt; // 추적값 갱신(숨겨져 있어도) → 다시 열 때 따라온 위치로
+        panelPos.left = nl;
+        if (linked.style.display !== "none") {
+          linked.style.bottom = "auto";
+          linked.style.right = "auto";
+          linked.style.top = nt + "px";
+          linked.style.left = nl + "px";
+        }
       }
     });
     const end = (e) => {
@@ -219,8 +282,8 @@
     handle.addEventListener("pointercancel", end);
   }
 
-  makeDraggable(panel, panel.querySelector(".ca-panel-head")); // 패널: 헤더로 이동
-  makeDraggable(bar, bar.querySelector(".ca-grip"), true); // 도구막대: ⠿ 손잡이로 이동(오른쪽 고정)
+  // 도구막대 ⠿ 손잡이 하나로 도구막대+패널을 함께 이동(오른쪽 고정). 패널은 별도 핸들 없음.
+  makeDraggable(bar, bar.querySelector(".ca-grip"), true, panel);
 
   // 빨강 표시 — 토글. 버튼을 켜두면(활성) 패널에서 선택만 해도 표시/해제됨.
   // 단축키: 패널에 선택이 있을 때 ~(Shift+백틱) 키로도 표시/해제. (백틱은 도구막대 토글로 이동)
@@ -308,6 +371,7 @@
       panelBody.textContent = text;
     }
     panel.style.display = "flex";
+    applyPanelPos();
     syncPanelChrome();
   }
 
@@ -505,8 +569,20 @@
       }
     } else if (panelHiddenByBar) {
       panel.style.display = "flex";
+      applyPanelPos();
       panelHiddenByBar = false;
     }
+  }
+
+  // 첫 주석 작성 시: 접혀 있던 도구막대를 펼치고 '정리' 탭을 열어 방금 정리된 주석을 바로 보여준다.
+  // (페이지 로드당 1회만 — 이후엔 사용자가 직접 토글)
+  let firstAnnotationRevealed = false;
+  let backtickUsed = false; // 백틱으로 '처음 펼칠 때'만 형광펜까지 켜기 위한 1회용 플래그
+  function revealOnFirstAnnotation() {
+    if (firstAnnotationRevealed || annotations.length === 0) return;
+    firstAnnotationRevealed = true;
+    if (bar.classList.contains("ca-bar-collapsed")) toggleBar();
+    showAnnotationsPanel();
   }
 
   bar.addEventListener("click", (e) => {
@@ -528,7 +604,7 @@
     if (e.target.closest("button")) e.preventDefault();
   });
 
-  // 단축키: ` 도구막대 토글, Esc 모드 해제(모디파이어 없이) / Alt+1~5 기능
+  // 단축키: ` 도구막대 접기/펼치기(처음 펼칠 때만 형광펜까지 ON), Esc 모드 해제 / Alt+1~4 기능
   // (Alt 를 붙여 YouTube 등 사이트의 단일키 단축키와 안 겹치게 함)
   document.addEventListener("keydown", (e) => {
     if (e.ctrlKey || e.metaKey) return; // 브라우저 조합키와 충돌 방지
@@ -539,7 +615,10 @@
     if (!e.altKey) {
       if (e.key === "`") {
         e.preventDefault();
-        toggleBar(); // 백틱: 도구막대 접기/펼치기
+        const wasCollapsed = bar.classList.contains("ca-bar-collapsed");
+        toggleBar(); // 백틱: 도구막대(+패널) 접기/펼치기
+        if (!backtickUsed && wasCollapsed) activateHighlight(); // 처음 펼칠 때만 형광펜 ON
+        backtickUsed = true;
       } else if (e.key === "Escape" && mode) {
         applyMode(null);
       }
@@ -562,10 +641,6 @@
       case "4":
         e.preventDefault();
         exportNotion();
-        break;
-      case "5":
-        e.preventDefault();
-        togglePanelTab("summary");
         break;
     }
   });
@@ -605,6 +680,7 @@
     });
     sel.removeAllRanges();
     refreshAnnotationsPanel();
+    revealOnFirstAnnotation();
   }
 
   function getSelectedTextNodes(range) {
@@ -673,6 +749,7 @@
       const ann = { type: "rect", id, rect: box, image: null };
       annotations.push(ann);
       refreshAnnotationsPanel(); // 네모 추가 즉시 반영(이미지는 캡처 후 한 번 더)
+      revealOnFirstAnnotation();
       // 그린 영역을 즉시(조용히) 캡처해 주석에 저장 (저장 버튼/AI에서 재사용)
       captureRegion(box)
         .then((dataUrl) => {
@@ -814,8 +891,6 @@
     tools.style.display = "none";
     toolsTarget = null;
   });
-  // 전체삭제 — 개별삭제(✕) 옆에서 한 번에 정리(확인 1회). clearAllAnnotations 가 미니툴바도 닫음
-  btnDelAll.addEventListener("click", () => clearAllAnnotations());
   // 형광펜 문장(hover 한 span)을 텍스트로 복사
   btnCopyTxt.addEventListener("click", () => {
     if (!toolsTarget) return;
@@ -926,6 +1001,21 @@
     refreshAnnotationsPanel();
   }
 
+  // id 로 주석 삭제 — 패널 항목 ✕ 에서 호출. DOM(형광펜 span/네모 el)도 함께 정리.
+  function deleteAnnotationById(id) {
+    const ann = annotations.find((a) => a.id === id);
+    if (!ann) return;
+    if (ann.type === "highlight") {
+      const span = document.querySelector("." + HL + '[data-ca-id="' + id + '"]');
+      if (span) return removeHighlight(span);
+    } else {
+      const el = document.querySelector('.ca-rect[data-ca-id="' + id + '"]');
+      if (el) return removeAnnotation(el);
+    }
+    dropAnnotation(id); // DOM 요소를 못 찾는 예외 상황: 배열에서만 제거
+    refreshAnnotationsPanel();
+  }
+
   function dropAnnotation(id) {
     const i = annotations.findIndex((a) => a.id === id);
     if (i >= 0) annotations.splice(i, 1);
@@ -1014,15 +1104,19 @@
     const esc = (s) =>
       String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
     panelBody.innerHTML = items
-      .map((it) =>
-        it.type === "highlight"
-          ? '<div style="border-left:3px solid #ff7f50;background:#fff5f0!important;color:#222!important;' +
-            'margin:8px 0;padding:6px 10px;border-radius:4px">' + esc(it.text) + "</div>"
-          : it.image
-          ? '<div style="margin:10px 0"><img src="' + it.image +
-            '" style="max-width:100%;border:1px solid #ddd;border-radius:4px"></div>'
-          : '<div style="color:#888;margin:8px 0;font-size:13px">[네모 캡처 중…]</div>'
-      )
+      .map((it) => {
+        const del =
+          '<button class="ca-anno-del" data-ca-del="' + it.id + '" title="이 주석 삭제">✕</button>';
+        const inner =
+          it.type === "highlight"
+            ? '<div style="border-left:3px solid #ff7f50;background:#fff5f0!important;color:#222!important;' +
+              'margin:8px 0;padding:6px 28px 6px 10px;border-radius:4px">' + esc(it.text) + "</div>"
+            : it.image
+            ? '<div style="margin:10px 0"><img src="' + it.image +
+              '" style="max-width:100%;border:1px solid #ddd;border-radius:4px"></div>'
+            : '<div style="color:#888;margin:8px 0;font-size:13px">[네모 캡처 중…]</div>';
+        return '<div class="ca-anno-item">' + inner + del + "</div>";
+      })
       .join("");
   }
 
@@ -1038,6 +1132,7 @@
     panelBody.style.whiteSpace = "normal";
     renderAnnotationsBody();
     panel.style.display = "flex";
+    applyPanelPos();
     syncPanelChrome();
   }
 

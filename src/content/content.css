@@ -118,16 +118,17 @@
   cursor: text !important;
 }
 
-/* 모드 커서(I빔·십자선)가 우리 UI의 이동 핸들까지 덮지 않게 — 더 높은 우선순위로 move 유지 */
+/* 모드 커서(I빔·십자선)가 도구막대 이동 핸들을 덮지 않게 — move 유지 */
 .ca-hl-cursor .ca-grip,
-.ca-rect-cursor .ca-grip,
-.ca-hl-cursor .ca-panel-grip,
-.ca-rect-cursor .ca-panel-grip,
+.ca-rect-cursor .ca-grip {
+  cursor: move !important;
+}
+/* 패널 헤더는 더 이상 드래그 핸들이 아니므로 모드 커서에 안 덮이게 기본 커서 유지 */
 .ca-hl-cursor .ca-panel-head,
 .ca-rect-cursor .ca-panel-head,
 .ca-hl-cursor .ca-panel-title,
 .ca-rect-cursor .ca-panel-title {
-  cursor: move !important;
+  cursor: default !important;
 }
 
 /* 모드 커서가 패널 본문(주석 정리·요약·이미지)까지 덮지 않게 — 일반 커서 유지(링크만 pointer) */
@@ -138,7 +139,9 @@
   cursor: default !important;
 }
 .ca-hl-cursor .ca-panel-body a,
-.ca-rect-cursor .ca-panel-body a {
+.ca-rect-cursor .ca-panel-body a,
+.ca-hl-cursor .ca-panel-body .ca-anno-del,
+.ca-rect-cursor .ca-panel-body .ca-anno-del {
   cursor: pointer !important;
 }
 /* 패널 헤더 버튼 안쪽 요소(빨강표시 버튼의 A span 등)도 모드 커서에 안 덮이게 */
@@ -236,14 +239,7 @@
   gap: 6px;
   padding: 8px 10px;
   border-bottom: 1px solid #eee;
-  cursor: move; /* 헤더를 잡고 패널 이동 */
-}
-.ca-panel-grip {
-  cursor: move;
-  color: #bbb;
-  font-size: 13px;
-  user-select: none;
-  touch-action: none; /* 포인터 드래그가 스크롤로 가로채이지 않게 */
+  cursor: default; /* 패널은 도구막대 ⠿ 손잡이로만 이동 — 헤더 자체는 드래그 안 함 */
 }
 .ca-panel-head {
   touch-action: none;
@@ -261,7 +257,7 @@
 .ca-panel.ca-min .ca-panel-head {
   border-bottom: none;
 }
-/* 최소화 시 도구 버튼·하위탭도 숨겨 일반 도구막대처럼 핸들만 남김(⠿ 제목 ▴) */
+/* 최소화 시 도구 버튼·하위탭도 숨겨 제목과 펼치기 버튼만 남김(제목 ▴) */
 .ca-panel.ca-min .ca-panel-mark,
 .ca-panel.ca-min .ca-panel-clearmark,
 .ca-panel.ca-min .ca-panel-resum,
@@ -301,8 +297,9 @@
   color: #c0392b;
   font-weight: 600;
 }
-/* 탭줄의 🔄 다시 요약 (AI 요약 탭 오른쪽) */
-.ca-panel-tabs .ca-panel-resum {
+/* 탭줄의 🔄 다시 요약(AI 요약 탭) · 🗑 전체삭제(주석 정리 탭) */
+.ca-panel-tabs .ca-panel-resum,
+.ca-panel-tabs .ca-panel-clearall {
   all: unset;
   width: 26px;
   height: 26px;
@@ -315,6 +312,17 @@
 }
 .ca-panel-tabs .ca-panel-resum:hover {
   background: #f1f1f1;
+}
+/* 🗑 전체삭제 — 삭제 동작이라 빨강 + 연한 배경으로 눈에 띄게, 탭줄 오른쪽 끝 */
+.ca-panel-tabs .ca-panel-clearall {
+  margin-left: auto;
+  width: auto;
+  padding: 0 8px;
+  color: #c0392b;
+  background: #fdecea;
+}
+.ca-panel-tabs .ca-panel-clearall:hover {
+  background: #f7c8c1;
 }
 .ca-panel-head button {
   all: unset;
@@ -340,6 +348,32 @@
 }
 .ca-panel-body .ca-line {
   margin: 3px 0;
+}
+/* 주석 정리 항목 + 항목별 ✕ 삭제(항목에 hover 시 표시) */
+.ca-panel-body .ca-anno-item {
+  position: relative;
+}
+.ca-panel-body .ca-anno-del {
+  all: unset;
+  position: absolute;
+  top: 10px;
+  right: 6px;
+  width: 18px;
+  height: 18px;
+  line-height: 18px;
+  text-align: center;
+  border-radius: 4px;
+  font-size: 11px;
+  color: #c0392b;
+  background: rgba(255, 255, 255, 0.85);
+  cursor: pointer !important;
+  opacity: 0;
+}
+.ca-panel-body .ca-anno-item:hover .ca-anno-del {
+  opacity: 1;
+}
+.ca-panel-body .ca-anno-del:hover {
+  background: #fdecea;
 }
 /* 최상위 단락(1. 2. …) — 위에 한 칸 간격 + 제목색(파랑·굵게) */
 .ca-panel-body .ca-sec {
