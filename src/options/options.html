@@ -4,25 +4,30 @@
     <meta charset="utf-8" />
     <title>Reading Highlighter 설정</title>
     <style>
+      html, body { background: #1b1b1f; }
       body {
         font-family: -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
         max-width: 520px;
         margin: 40px auto;
         padding: 0 20px;
-        color: #222;
+        color: #e4e4e7;
         line-height: 1.5;
       }
-      h1 { font-size: 20px; }
+      h1 { font-size: 20px; color: #f4f4f5; }
       label { display: block; margin: 18px 0 6px; font-weight: 600; font-size: 14px; }
       input, select {
         width: 100%;
         box-sizing: border-box;
         padding: 9px 10px;
-        border: 1px solid #ccc;
+        border: 1px solid #3a3a40;
         border-radius: 8px;
         font-size: 14px;
+        background: #2a2a2e;
+        color: #e4e4e7;
       }
-      .hint { color: #888; font-size: 12px; margin-top: 4px; }
+      input::placeholder { color: #6b6b72; }
+      input:focus, select:focus { outline: none; border-color: #ff7f50; }
+      .hint { color: #9a9aa0; font-size: 12px; margin-top: 4px; }
       .row { display: flex; gap: 8px; margin-top: 20px; }
       button {
         padding: 9px 16px;
@@ -33,10 +38,10 @@
         color: #fff;
         background: #ff7f50;
       }
-      button.secondary { background: #555; }
+      button.secondary { background: #3a3a40; }
       #status, #notion-status { margin-top: 16px; font-size: 13px; min-height: 18px; word-break: break-all; }
-      .ok { color: #1e8e3e; }
-      .err { color: #d93025; }
+      .ok { color: #4ade80; }
+      .err { color: #f87171; }
     </style>
   </head>
   <body>
@@ -61,7 +66,7 @@
     </div>
     <div id="status"></div>
 
-    <hr style="margin: 32px 0; border: none; border-top: 1px solid #eee" />
+    <hr style="margin: 32px 0; border: none; border-top: 1px solid #34343a" />
 
     <h1 style="font-size: 17px">Notion 내보내기 (선택)</h1>
 
