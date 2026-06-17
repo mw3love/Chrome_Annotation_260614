@@ -78,13 +78,54 @@
     '<button class="ca-panel-resum" title="AI 요약 다시하기">🔄</button>' +
     '<button class="ca-panel-clearall" title="이 페이지 주석 전체 삭제">🗑 전체삭제</button>' +
     "</div>" +
-    '<div class="ca-panel-body"></div>';
+    '<div class="ca-panel-body"></div>' +
+    // 주석 정리 탭 전용 하단 고정 입력창 — 본문(재렌더 대상) 밖이라 새 주석이 들어와도 입력 글자 유지.
+    '<div class="ca-note-composer" contenteditable="true" data-ph="노트 입력 후 Enter (Shift+Enter 줄바꿈)…"></div>';
   document.documentElement.appendChild(panel);
   const panelBody = panel.querySelector(".ca-panel-body");
-  // 주석 정리 탭의 항목별 ✕ 삭제 — 이벤트 위임(렌더 때마다 다시 거는 일 없이 한 번만)
+  const noteComposer = panel.querySelector(".ca-note-composer");
+  // 주석 정리 탭의 ✕ 삭제 / + 노트삽입 — 이벤트 위임(렌더 때마다 다시 거는 일 없이 한 번만)
   panelBody.addEventListener("click", (e) => {
-    const b = e.target.closest(".ca-anno-del");
-    if (b) deleteAnnotationById(b.getAttribute("data-ca-del"));
+    const del = e.target.closest(".ca-anno-del");
+    if (del) return deleteAnnotationById(del.getAttribute("data-ca-del"));
+    const add = e.target.closest(".ca-note-add");
+    if (add) return insertNoteAfter(add.getAttribute("data-after"));
+    const mv = e.target.closest(".ca-note-mv");
+    if (mv) return moveNote(mv.getAttribute("data-note-move"), Number(mv.getAttribute("data-dir")));
+    const ts = e.target.closest(".ca-ts");
+    if (ts) {
+      const vids = document.querySelectorAll("video");
+      const v = vids[Number(ts.getAttribute("data-seek"))] || vids[0];
+      if (v) {
+        v.currentTime = Number(ts.getAttribute("data-t"));
+        v.scrollIntoView({ block: "center", behavior: "smooth" });
+      }
+    }
+  });
+  // 노트·캡션 인라인 편집 — 데이터만 갱신(재렌더 X, 포커스 유지). innerText 로 줄바꿈 보존.
+  panelBody.addEventListener("input", (e) => {
+    const note = e.target.closest("[data-note-edit]");
+    if (note) {
+      const a = annotations.find((x) => x.id === note.getAttribute("data-note-edit"));
+      if (a) a.text = note.innerText;
+      return;
+    }
+    const cap = e.target.closest("[data-cap-edit]");
+    if (cap) {
+      const a = annotations.find((x) => x.id === cap.getAttribute("data-cap-edit"));
+      if (a) a.caption = cap.innerText;
+    }
+  });
+  // 한글 등 IME 조합 중에는 재렌더를 보류(조합 깨짐 방지). 보류된 갱신이 있을 때만 조합 끝에 flush.
+  let panelComposing = false;
+  let panelRefreshPending = false;
+  panelBody.addEventListener("compositionstart", () => (panelComposing = true));
+  panelBody.addEventListener("compositionend", () => {
+    panelComposing = false;
+    if (panelRefreshPending) {
+      panelRefreshPending = false;
+      refreshAnnotationsPanel();
+    }
   });
   let panelRaw = ""; // 복사용 원문(마크다운)
   let panelTitle = "";
@@ -144,6 +185,7 @@
     sh(copyBtn, isSum || k === "qa");
     sh(pdfBtn, tabbed || k === "qa");
     sh(tabBar, tabbed);
+    sh(noteComposer, isAnn); // 하단 노트 입력창은 주석 정리 탭에서만
     tabBtns.forEach((b) => b.classList.toggle("active", b.dataset.tab === k));
   }
   tabBtns.forEach((b) => b.addEventListener("click", () => openPanelTab(b.dataset.tab)));
@@ -299,6 +341,7 @@
     if (markMode) setTimeout(toggleMarkSelection, 0); // 선택 확정 후 적용
   });
   document.addEventListener("keydown", (e) => {
+    if (extHidden) return; // 확장이 꺼져 있으면 ~ 표시 토글도 무시
     if (e.key !== "~" || !panelIsMd) return;
     const sel = window.getSelection();
     if (sel && !sel.isCollapsed && panelBody.contains(sel.anchorNode)) {
@@ -607,11 +650,12 @@
   // 단축키: ` 도구막대 접기/펼치기(처음 펼칠 때만 형광펜까지 ON), Esc 모드 해제 / Alt+1~4 기능
   // (Alt 를 붙여 YouTube 등 사이트의 단일키 단축키와 안 겹치게 함)
   document.addEventListener("keydown", (e) => {
+    if (extHidden) return; // 확장이 꺼진(미니팝업 OFF) 상태면 단축키(백틱 등) 무시
     if (e.ctrlKey || e.metaKey) return; // 브라우저 조합키와 충돌 방지
     const el = document.activeElement;
     const typing =
       el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
-    if (typing) return;
+    if (typing && !e.altKey) return; // 타이핑 중엔 무모디파이어 단축키(백틱·Esc)만 무시, Alt 조합은 허용
     if (!e.altKey) {
       if (e.key === "`") {
         e.preventDefault();
@@ -652,10 +696,13 @@
     if (!msg || msg.type !== "toggle-toolbar") return;
     extHidden = !extHidden;
     bar.classList.toggle("ca-hidden", extHidden);
+    // 페이지의 형광펜·네모(영상 캡처 제외 — 그건 이미 박스 없음)도 함께 숨김/복원
+    document.documentElement.classList.toggle("ca-ext-off", extHidden);
     if (extHidden) {
       panelDisplayBeforeHide = panel.style.display;
       panel.style.display = "none";
       tools.style.display = "none";
+      applyMode(null); // 그리기 모드·커서 해제(끈 상태에선 새 주석도 안 그려지게)
     } else {
       panel.style.display = panelDisplayBeforeHide;
     }
@@ -724,46 +771,111 @@
   let dragEl = null;
   let suppressClick = false; // 드래그 직후 따라오는 click 1회 무효화 플래그
 
-  document.addEventListener("mousedown", (e) => {
-    if (mode !== "rect" || e.button !== 0 || isUI(e.target)) return;
-    e.preventDefault();
-    dragStart = { x: e.pageX, y: e.pageY };
-    dragEl = document.createElement("div");
-    dragEl.className = "ca-rect";
-    document.documentElement.appendChild(dragEl);
-    drawRect(e);
-  });
+  // 네모 모드의 드래그 제스처가 페이지(예: 유튜브 영상의 클릭=재생토글)에 닿지 않도록
+  // 포인터 다운/업을 캡처 단계에서 가로채 페이지로의 전파를 끊는다. (우리 mouse 핸들러는 그대로 동작)
+  const swallowPointer = (e) => {
+    if (mode !== "rect" || isUI(e.target)) return;
+    e.stopImmediatePropagation(); // 사이트가 먼저 등록한 캡처 리스너(예: 유튜브)까지 차단
+  };
+  document.addEventListener("pointerdown", swallowPointer, true);
+  document.addEventListener("pointerup", swallowPointer, true);
+
+  // 노트·캡션 등 우리 UI 입력칸에서 타이핑할 때 키 이벤트가 페이지로 새어 사이트 단축키
+  // (예: 유튜브 스페이스=재생/정지)를 건드리지 않게 캡처 단계에서 차단. preventDefault 는 안 해
+  // 글자 입력 자체는 정상.
+  const swallowTypingKeys = (e) => {
+    const el = e.target;
+    if (!isUI(el) || !(el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)))
+      return;
+    // 하단 노트 입력창의 Enter(완성) 처리 — 이 차단 함수가 입력창 자체 핸들러보다 먼저 돌므로 여기서 처리.
+    if (
+      el === noteComposer &&
+      e.type === "keydown" &&
+      e.key === "Enter" &&
+      !e.shiftKey &&
+      !e.isComposing // 한글 조합 확정용 Enter 는 제출하지 않음(한 번 더 누르면 제출)
+    ) {
+      e.preventDefault();
+      const text = noteComposer.innerText.trim();
+      if (text) addNoteAtEnd(text);
+      noteComposer.textContent = "";
+    }
+    // Alt/Ctrl/Meta 조합은 우리 단축키(Alt+숫자 등) — 페이지로 가도 무해하고 우리 핸들러에 닿아야 하므로 통과.
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    e.stopImmediatePropagation(); // 무모디파이어 키만 페이지(사이트 단축키)로 전파 차단
+  };
+  ["keydown", "keyup", "keypress"].forEach((evt) =>
+    window.addEventListener(evt, swallowTypingKeys, true)
+  );
+
+  // 캡처 단계 + stopPropagation 으로 페이지보다 먼저 잡아 드래그 제스처를 사이트에서 격리한다.
+  document.addEventListener(
+    "mousedown",
+    (e) => {
+      if (mode !== "rect" || e.button !== 0 || isUI(e.target)) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      dragStart = { x: e.pageX, y: e.pageY };
+      dragEl = document.createElement("div");
+      dragEl.className = "ca-rect";
+      document.documentElement.appendChild(dragEl);
+      drawRect(e);
+    },
+    true
+  );
 
   document.addEventListener("mousemove", (e) => {
     if (dragEl) drawRect(e);
   });
 
-  document.addEventListener("mouseup", (e) => {
+  document.addEventListener(
+    "mouseup",
+    (e) => {
     if (!dragEl) return;
+    e.stopImmediatePropagation();
     const box = boxOf(e);
     if (box.w < 8 || box.h < 8) {
       dragEl.remove(); // 너무 작으면 취소
     } else {
       const id = uid();
-      dragEl.dataset.caId = id;
+      const vid = videoUnder(box); // 영상 위면 시간축 캡처로 전환
       const ann = { type: "rect", id, rect: box, image: null };
+      if (vid) {
+        // 영상 캡처: 타임스탬프 기록, page-Y 대신 영상 문서-Y로 묶고 시간순 정렬. 박스는 안 남김.
+        ann.videoTime = vid.v.currentTime || 0;
+        ann.videoIdx = vid.idx;
+        // 같은 영상의 캡처는 첫 캡처의 Y를 재사용 → 스크롤·미니플레이어로 위치가 변해도 한 묶음 유지.
+        const prior = annotations.find(
+          (a) => a.type === "rect" && a.videoIdx === vid.idx && a.videoTop != null
+        );
+        ann.videoTop = prior ? prior.videoTop : vid.v.getBoundingClientRect().top + window.scrollY;
+      } else {
+        dragEl.dataset.caId = id; // 기사·논문: 박스를 페이지에 유지(형광펜 삭제 연동용)
+      }
       annotations.push(ann);
       refreshAnnotationsPanel(); // 네모 추가 즉시 반영(이미지는 캡처 후 한 번 더)
       revealOnFirstAnnotation();
+      const boxEl = dragEl; // 캡처 후 정리에 쓰려고 참조 보관
       // 그린 영역을 즉시(조용히) 캡처해 주석에 저장 (저장 버튼/AI에서 재사용)
       captureRegion(box)
         .then((dataUrl) => {
           ann.image = dataUrl;
+          if (vid) boxEl.remove(); // 영상: 캡처 끝나면 박스 제거(시청 방해·다음 캡처 혼동 방지)
           refreshAnnotationsPanel();
         })
-        .catch((err) => console.warn("[주석] 캡처 실패:", err));
+        .catch((err) => {
+          if (vid) boxEl.remove();
+          console.warn("[주석] 캡처 실패:", err);
+        });
     }
     dragEl = null;
     dragStart = null;
     // 드래그가 끝나면 브라우저가 click 을 한 번 더 쏜다 → 이미지/링크 팝업 방지로 1회 무효화
     suppressClick = true;
     setTimeout(() => (suppressClick = false), 0);
-  });
+    },
+    true
+  );
 
   // 네모 드래그 직후의 click 을 캡처 단계에서 가로채 무효화 (페이지 핸들러보다 먼저)
   document.addEventListener(
@@ -784,6 +896,29 @@
       w: Math.abs(e.pageX - dragStart.x),
       h: Math.abs(e.pageY - dragStart.y),
     };
+  }
+
+  // 박스 중심이 <video> 위에 있으면 그 영상과 인덱스를 돌려준다(없으면 null). 페이지좌표→뷰포트좌표 변환.
+  function videoUnder(box) {
+    const cx = box.x - window.scrollX + box.w / 2;
+    const cy = box.y - window.scrollY + box.h / 2;
+    const vids = Array.from(document.querySelectorAll("video"));
+    for (let i = 0; i < vids.length; i++) {
+      const r = vids[i].getBoundingClientRect();
+      if (r.width && cx >= r.left && cx <= r.right && cy >= r.top && cy <= r.bottom)
+        return { v: vids[i], idx: i };
+    }
+    return null;
+  }
+
+  // 초 → mm:ss (1시간 이상이면 h:mm:ss)
+  function fmtTime(s) {
+    s = Math.max(0, Math.floor(s || 0));
+    const h = Math.floor(s / 3600),
+      m = Math.floor((s % 3600) / 60),
+      sec = s % 60;
+    const mm = h ? String(m).padStart(2, "0") : String(m);
+    return (h ? h + ":" : "") + mm + ":" + String(sec).padStart(2, "0");
   }
 
   function drawRect(e) {
@@ -987,11 +1122,11 @@
   });
 
   function removeHighlight(span) {
+    dropAnnotation(span.dataset.caId); // DOM 제거 전에: 노트 승계 순서 계산이 span 위치를 읽을 수 있게
     const parent = span.parentNode;
     while (span.firstChild) parent.insertBefore(span.firstChild, span);
     parent.removeChild(span);
     parent.normalize();
-    dropAnnotation(span.dataset.caId);
     refreshAnnotationsPanel();
   }
 
@@ -1017,8 +1152,22 @@
   }
 
   function dropAnnotation(id) {
+    // 삭제될 항목을 앵커로 삼던 노트는 '위쪽 가장 가까운 형광펜/네모'로 승계시켜 제자리를 지킨다(고아 방지).
+    const order = collectSorted();
+    const pos = order.findIndex((a) => a.id === id);
+    let newAnchor = null;
+    for (let k = pos - 1; k >= 0; k--) {
+      if (order[k].type !== "note") {
+        newAnchor = order[k].id;
+        break;
+      }
+    }
     const i = annotations.findIndex((a) => a.id === id);
-    if (i >= 0) annotations.splice(i, 1);
+    if (i < 0) return;
+    annotations.splice(i, 1);
+    annotations.forEach((a) => {
+      if (a.type === "note" && a.afterId === id) a.afterId = newAnchor;
+    });
   }
 
   // 페이지의 형광펜·네모 주석을 한 번에 제거(확인 1회). 요약 패널·캐시는 건드리지 않는다.
@@ -1042,18 +1191,40 @@
 
   // ---------- 내보내기 ----------
   // 주석을 문서 위→아래 순서로 정렬 (형광펜=화면 위치, 네모=캡처 당시 y)
+  // 형광펜·네모는 페이지 Y 좌표순. 노트(직접 입력)는 페이지 위치가 없으므로 afterId(= 가장 가까운 윗
+  // 형광펜/네모 id, 없으면 null)로 그 뒤에 매단다. 같은 앵커의 노트끼리는 annotations 배열 순서를 따른다
+  // (삽입·▲▼ 재배치가 이 순서를 바꾼다). 노트는 노트에 매달지 않음 → 재배치가 단순·견고.
   function collectSorted() {
-    return annotations
+    const notes = annotations.filter((a) => a.type === "note");
+    const positioned = annotations
+      .filter((a) => a.type !== "note")
       .map((a) => {
-        let y = a.type === "rect" ? a.rect.y : 0;
+        // 영상 캡처는 영상의 문서-Y로 묶고(같은 영상끼리 모임), 2차 키 t(영상 시간)로 시간순 정렬.
+        let y = a.type === "rect" ? (a.videoTop != null ? a.videoTop : a.rect.y) : 0;
         if (a.type === "highlight") {
           const el = document.querySelector("." + HL + '[data-ca-id="' + a.id + '"]');
           if (el) y = el.getBoundingClientRect().top + window.scrollY;
         }
-        return { ann: a, y };
+        return { ann: a, y, t: a.videoTime != null ? a.videoTime : 0 };
       })
-      .sort((p, q) => p.y - q.y)
+      .sort((p, q) => p.y - q.y || p.t - q.t)
       .map((x) => x.ann);
+    const out = [];
+    const placed = new Set();
+    const pushNotes = (anchorId) =>
+      notes.forEach((n) => {
+        if ((n.afterId || null) === anchorId) {
+          out.push(n);
+          placed.add(n.id);
+        }
+      });
+    pushNotes(null); // 최상단(앵커 없는) 노트
+    for (const a of positioned) {
+      out.push(a);
+      pushNotes(a.id);
+    }
+    notes.forEach((n) => placed.has(n.id) || out.push(n)); // 앵커가 사라진 고아 노트는 끝에
+    return out;
   }
 
   function buildHTML(items) {
@@ -1063,8 +1234,18 @@
       .map((it) =>
         it.type === "highlight"
           ? "<blockquote>" + esc(it.text) + "</blockquote>"
+          : it.type === "note"
+          ? '<p class="note">' + esc(it.text) + "</p>"
           : it.image
-          ? '<figure><img src="' + it.image + '"></figure>'
+          ? (function () {
+              const cap =
+                (it.videoTime != null ? "[" + fmtTime(it.videoTime) + "] " : "") + (it.caption || "");
+              return (
+                '<figure><img src="' + it.image + '">' +
+                (cap.trim() ? "<figcaption>" + esc(cap) + "</figcaption>" : "") +
+                "</figure>"
+              );
+            })()
           : ""
       )
       .join("\n");
@@ -1079,6 +1260,8 @@
       "blockquote{border-left:4px solid #ff7f50;background:#fff5f0;margin:12px 0;" +
       "padding:8px 14px;border-radius:4px}" +
       "figure{margin:16px 0}img{max-width:100%;border:1px solid #ddd;border-radius:4px}" +
+      "figcaption{color:#666;font-size:13px;margin-top:4px}" +
+      "p.note{margin:10px 0;color:#333;white-space:pre-wrap}" +
       "</style></head><body><h1>" +
       esc(document.title) +
       '</h1><div class="src">' +
@@ -1096,28 +1279,104 @@
   // div + 명시 색상(!important)으로 렌더 — 패널은 페이지 DOM 에 주입돼 사이트 CSS 영향을 받는다.
   function renderAnnotationsBody() {
     const items = collectSorted();
+    const esc = (s) =>
+      String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
     if (!items.length) {
       panelBody.innerHTML =
         '<div style="color:#888;padding:4px;font-size:13px">아직 주석이 없습니다. 형광펜이나 네모를 추가하면 여기에 실시간으로 정리됩니다.</div>';
       return;
     }
-    const esc = (s) =>
-      String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
-    panelBody.innerHTML = items
-      .map((it) => {
-        const del =
-          '<button class="ca-anno-del" data-ca-del="' + it.id + '" title="이 주석 삭제">✕</button>';
-        const inner =
-          it.type === "highlight"
-            ? '<div style="border-left:3px solid #ff7f50;background:#fff5f0!important;color:#222!important;' +
-              'margin:8px 0;padding:6px 28px 6px 10px;border-radius:4px">' + esc(it.text) + "</div>"
-            : it.image
-            ? '<div style="margin:10px 0"><img src="' + it.image +
-              '" style="max-width:100%;border:1px solid #ddd;border-radius:4px"></div>'
-            : '<div style="color:#888;margin:8px 0;font-size:13px">[네모 캡처 중…]</div>';
-        return '<div class="ca-anno-item">' + inner + del + "</div>";
-      })
-      .join("");
+    // 항목 사이/양끝의 노트 삽입 자리(+). data-after = 바로 위 항목 id("" = 최상단)
+    const gap = (afterId) =>
+      '<div class="ca-note-gap"><button class="ca-note-add" data-after="' + afterId +
+      '" title="여기에 노트 추가">+ 노트</button></div>';
+    panelBody.innerHTML =
+      gap("") +
+      items
+        .map((it, i) => {
+          const del =
+            '<button class="ca-anno-del" data-ca-del="' + it.id + '" title="이 주석 삭제">✕</button>';
+          let inner;
+          if (it.type === "highlight") {
+            inner =
+              '<div style="border-left:3px solid #ff7f50;background:#fff5f0!important;color:#222!important;' +
+              'margin:8px 0;padding:6px 28px 6px 10px;border-radius:4px">' + esc(it.text) + "</div>";
+          } else if (it.type === "note") {
+            inner =
+              '<div class="ca-note" data-note-edit="' + it.id +
+              '" contenteditable="true" data-ph="노트를 입력하세요…">' + esc(it.text) + "</div>" +
+              '<div class="ca-note-mv-wrap">' +
+              '<button class="ca-note-mv" data-note-move="' + it.id + '" data-dir="-1" title="위로">▲</button>' +
+              '<button class="ca-note-mv" data-note-move="' + it.id + '" data-dir="1" title="아래로">▼</button>' +
+              "</div>";
+          } else if (it.image) {
+            // 영상 캡처면 타임스탬프 배지(클릭→그 장면으로 점프)를 이미지 위에 단다.
+            const ts =
+              it.videoTime != null
+                ? '<button class="ca-ts" data-seek="' + (it.videoIdx || 0) + '" data-t="' +
+                  it.videoTime + '" title="이 장면으로 이동">▶ ' + esc(fmtTime(it.videoTime)) +
+                  "</button>"
+                : "";
+            inner =
+              '<div style="margin:10px 0">' + ts + '<img src="' + it.image +
+              '" style="max-width:100%;border:1px solid #ddd;border-radius:4px">' +
+              '<div class="ca-cap" data-cap-edit="' + it.id +
+              '" contenteditable="true" data-ph="캡션 입력(노션에 사진 아래로 저장)…">' +
+              esc(it.caption || "") + "</div></div>";
+          } else {
+            inner = '<div style="color:#888;margin:8px 0;font-size:13px">[네모 캡처 중…]</div>';
+          }
+          // 마지막 항목 뒤 gap 은 하단 상시 입력창과 중복이라 생략(상단·항목사이 삽입용 gap 만 유지).
+          const after = i < items.length - 1 ? gap(it.id) : "";
+          return '<div class="ca-anno-item">' + inner + del + "</div>" + after;
+        })
+        .join("");
+  }
+
+  // 삽입 위치 바로 위 항목(aboveId) 기준 앵커 계산 — 노트면 그 노트의 앵커를, 형광펜/네모면 자신을.
+  function anchorFor(aboveId) {
+    if (!aboveId) return null;
+    const a = annotations.find((x) => x.id === aboveId);
+    if (!a) return null;
+    return a.type === "note" ? a.afterId || null : a.id;
+  }
+
+  // 노트 삽입 — 바로 위 항목(aboveId, "" = 최상단) 뒤에 빈 노트를 만들고 그 자리로 포커스.
+  function insertNoteAfter(aboveId) {
+    const id = uid();
+    const idx = aboveId ? annotations.findIndex((a) => a.id === aboveId) : -1;
+    annotations.splice(idx + 1, 0, { type: "note", id, text: "", afterId: anchorFor(aboveId) });
+    renderAnnotationsBody();
+    const el = panelBody.querySelector('[data-note-edit="' + id + '"]');
+    if (el) el.focus();
+  }
+
+  // 하단 입력창에서 Enter 로 호출 — 맨 끝(마지막 표시 항목 뒤)에 노트를 추가. 포커스는 입력창에 유지.
+  function addNoteAtEnd(text) {
+    const order = collectSorted();
+    const lastId = order.length ? order[order.length - 1].id : "";
+    const idx = lastId ? annotations.findIndex((a) => a.id === lastId) : -1;
+    annotations.splice(idx + 1, 0, { type: "note", id: uid(), text, afterId: anchorFor(lastId) });
+    renderAnnotationsBody();
+  }
+
+  // 노트 한 칸 이동(▲ dir=-1 / ▼ dir=+1). 표시 순서에서 이웃과 자리를 바꾼 뒤, 각 노트의 앵커를
+  // '바로 위 형광펜/네모'로 다시 계산하고 annotations 를 그 순서로 재구성한다(형광펜/네모 상호순서는
+  // collectSorted 가 Y 로 다시 잡으므로 무방 — 이동은 노트만 대상이라 위치주석끼리는 안 바뀜).
+  function moveNote(id, dir) {
+    const order = collectSorted();
+    const i = order.findIndex((x) => x.id === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= order.length) return;
+    [order[i], order[j]] = [order[j], order[i]];
+    let lastPositioned = null;
+    for (const it of order) {
+      if (it.type === "note") it.afterId = lastPositioned;
+      else lastPositioned = it.id;
+    }
+    annotations.length = 0;
+    order.forEach((x) => annotations.push(x));
+    renderAnnotationsBody();
   }
 
   // 주석 정리 탭 열기 — 주석이 없어도 빈 안내로 열린다.
@@ -1136,9 +1395,63 @@
     syncPanelChrome();
   }
 
-  // 형광펜·네모가 추가/삭제/캡처될 때 주석 탭이 열려 있으면 즉시 다시 그린다(실시간 반영)
+  // 편집 중인 contenteditable 의 캐럿 위치(시작부터의 글자 수)를 구한다.
+  function caretOffset(el) {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return 0;
+    const r = sel.getRangeAt(0).cloneRange();
+    const pre = document.createRange();
+    pre.selectNodeContents(el);
+    pre.setEnd(r.endContainer, r.endOffset);
+    return pre.toString().length;
+  }
+  // 재렌더 후 같은 편집칸에 캐럿을 글자 수 기준으로 되돌린다.
+  function setCaret(el, offset) {
+    el.focus();
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let remain = offset,
+      node = null,
+      last = null,
+      n;
+    while ((n = walker.nextNode())) {
+      last = n;
+      if (n.textContent.length >= remain) {
+        node = n;
+        break;
+      }
+      remain -= n.textContent.length;
+    }
+    const r = document.createRange();
+    if (node) r.setStart(node, remain);
+    else if (last) r.setStart(last, last.textContent.length);
+    else r.setStart(el, 0);
+    r.collapse(true);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(r);
+  }
+
+  // 형광펜·네모가 추가/삭제/캡처될 때 주석 탭이 열려 있으면 즉시 다시 그린다(실시간 반영).
+  // 노트·캡션을 편집 중이어도 갱신하되, 그 편집칸의 캐럿을 복원해 타이핑이 끊기지 않게 한다.
   function refreshAnnotationsPanel() {
-    if (panel.style.display !== "none" && panelKind === "annotations") renderAnnotationsBody();
+    if (panel.style.display === "none" || panelKind !== "annotations") return;
+    if (panelComposing) {
+      panelRefreshPending = true; // IME 조합 중엔 보류 — compositionend 에서 다시 그림
+      return;
+    }
+    const ae = document.activeElement;
+    let keep = null;
+    if (ae && ae.isContentEditable && panelBody.contains(ae)) {
+      const id = ae.getAttribute("data-note-edit") || ae.getAttribute("data-cap-edit");
+      if (id) keep = { id, offset: caretOffset(ae) };
+    }
+    renderAnnotationsBody();
+    if (keep) {
+      const el = panelBody.querySelector(
+        '[data-note-edit="' + keep.id + '"],[data-cap-edit="' + keep.id + '"]'
+      );
+      if (el) setCaret(el, keep.offset);
+    }
   }
 
   function exportPDF() {
@@ -1281,11 +1594,19 @@
       .map((it) =>
         it.type === "highlight"
           ? { kind: "quote", text: it.text }
+          : it.type === "note"
+          ? { kind: "note", text: it.text }
           : it.image
-          ? { kind: "image", dataUrl: it.image }
+          ? {
+              kind: "image",
+              dataUrl: it.image,
+              // 영상 캡처면 캡션 앞에 [mm:ss] 를 붙여 노션 캡션에 시점 표시.
+              caption:
+                (it.videoTime != null ? "[" + fmtTime(it.videoTime) + "] " : "") + (it.caption || ""),
+            }
           : null
       )
-      .filter(Boolean);
+      .filter((it) => it && !(it.kind === "note" && !it.text.trim())); // 빈 노트 제외
     const hlCount = sorted.filter((it) => it.type === "highlight").length;
     const rectCount = sorted.filter((it) => it.type === "rect" && it.image).length;
     const summary = collectSummaryForNotion();

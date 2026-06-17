@@ -5,6 +5,14 @@
   cursor: inherit;
 }
 
+/* 확장 OFF(미니팝업 끔) — 페이지의 형광펜 배경·네모 박스 숨김(텍스트 자체는 보존) */
+html.ca-ext-off .ca-rect {
+  display: none !important;
+}
+html.ca-ext-off .ca-hl {
+  background-color: transparent !important;
+}
+
 /* 빨간 테두리 캡처 박스 */
 .ca-rect {
   position: absolute;
@@ -141,8 +149,18 @@
 .ca-hl-cursor .ca-panel-body a,
 .ca-rect-cursor .ca-panel-body a,
 .ca-hl-cursor .ca-panel-body .ca-anno-del,
-.ca-rect-cursor .ca-panel-body .ca-anno-del {
+.ca-rect-cursor .ca-panel-body .ca-anno-del,
+.ca-hl-cursor .ca-panel-body .ca-note-add,
+.ca-rect-cursor .ca-panel-body .ca-note-add,
+.ca-hl-cursor .ca-panel-body .ca-note-mv,
+.ca-rect-cursor .ca-panel-body .ca-note-mv {
   cursor: pointer !important;
+}
+.ca-hl-cursor .ca-panel-body .ca-note,
+.ca-rect-cursor .ca-panel-body .ca-note,
+.ca-hl-cursor .ca-panel-body .ca-cap,
+.ca-rect-cursor .ca-panel-body .ca-cap {
+  cursor: text !important;
 }
 /* 패널 헤더 버튼 안쪽 요소(빨강표시 버튼의 A span 등)도 모드 커서에 안 덮이게 */
 .ca-hl-cursor .ca-panel-head button *,
@@ -374,6 +392,141 @@
 }
 .ca-panel-body .ca-anno-del:hover {
   background: #fdecea;
+}
+/* 노트 위/아래 이동(▲▼) — 항목 hover 시 ✕ 왼쪽에 노출 */
+.ca-panel-body .ca-note-mv-wrap {
+  position: absolute;
+  top: 8px;
+  right: 28px;
+  display: flex;
+  gap: 2px;
+  opacity: 0.5; /* 평소에도 흐리게 보여 발견성 확보, hover 시 진하게 */
+}
+.ca-panel-body .ca-anno-item:hover .ca-note-mv-wrap {
+  opacity: 1;
+}
+.ca-panel-body .ca-note-mv {
+  all: unset;
+  width: 18px;
+  height: 18px;
+  line-height: 18px;
+  text-align: center;
+  border-radius: 4px;
+  font-size: 9px;
+  color: #555;
+  background: rgba(255, 255, 255, 0.85);
+  cursor: pointer !important;
+}
+.ca-panel-body .ca-note-mv:hover {
+  background: #e2e6ea;
+}
+/* 직접 입력 노트 — 주석 사이에 끼우는 개인 메모 (우측 패딩으로 ▲▼·✕ 컨트롤 자리 확보) */
+.ca-panel-body .ca-note {
+  margin: 8px 0;
+  padding: 6px 70px 6px 10px;
+  border-left: 3px solid #9ca3af;
+  background: #f6f7f9;
+  color: #222;
+  border-radius: 4px;
+  font-size: 13px;
+  white-space: pre-wrap;
+  outline: none;
+}
+/* 이미지 캡션 입력칸 */
+.ca-panel-body .ca-cap {
+  margin-top: 4px;
+  padding: 3px 6px;
+  color: #555;
+  font-size: 12px;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  outline: none;
+}
+.ca-panel-body .ca-cap:focus {
+  background: #f6f7f9;
+}
+/* 빈 편집칸 placeholder */
+.ca-panel-body .ca-note:empty::before,
+.ca-panel-body .ca-cap:empty::before {
+  content: attr(data-ph);
+  color: #aaa;
+}
+/* 노트 삽입 자리(+) — 평소 숨김, 그 자리에 hover 하면 가는 선과 + 버튼 노출 */
+.ca-panel-body .ca-note-gap {
+  height: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.ca-panel-body .ca-note-gap:hover {
+  opacity: 1;
+}
+.ca-panel-body .ca-note-add {
+  all: unset;
+  font-size: 11px;
+  color: #6b7280;
+  background: #eef0f3;
+  border-radius: 10px;
+  padding: 1px 10px;
+  cursor: pointer !important;
+}
+.ca-panel-body .ca-note-add:hover {
+  background: #e2e6ea;
+  color: #374151;
+}
+/* 영상 캡처 타임스탬프 배지 — 클릭하면 그 장면으로 이동 */
+.ca-panel-body .ca-ts {
+  all: unset;
+  display: inline-block;
+  margin-bottom: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  background: #ff7f50;
+  border-radius: 10px;
+  cursor: pointer !important;
+}
+.ca-panel-body .ca-ts:hover {
+  background: #e3573f;
+}
+.ca-hl-cursor .ca-panel-body .ca-ts,
+.ca-rect-cursor .ca-panel-body .ca-ts {
+  cursor: pointer !important;
+}
+/* 하단 상시 노트 입력창 (주석 정리 탭 전용) — 본문과 분리된 고정 영역 */
+.ca-note-composer {
+  flex-shrink: 0; /* 본문이 길어도 flexbox 가 입력창을 찌부러뜨리지 않게 */
+  margin: 4px 10px 10px;
+  padding: 8px 10px;
+  max-height: 120px;
+  overflow-y: auto;
+  border: 1px solid #d0d3d9;
+  border-radius: 6px;
+  background: #fff;
+  color: #222;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  cursor: text;
+  outline: none;
+}
+.ca-note-composer:focus {
+  border-color: #ff7f50;
+}
+.ca-note-composer:empty::before {
+  content: attr(data-ph);
+  color: #aaa;
+}
+.ca-panel.ca-min .ca-note-composer {
+  display: none;
+}
+/* 모드 활성 중에도 입력창은 글자 커서 유지 */
+.ca-hl-cursor .ca-note-composer,
+.ca-rect-cursor .ca-note-composer {
+  cursor: text !important;
 }
 /* 최상위 단락(1. 2. …) — 위에 한 칸 간격 + 제목색(파랑·굵게) */
 .ca-panel-body .ca-sec {

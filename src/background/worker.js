@@ -115,9 +115,16 @@ function notionExportBlocks(spec, imageIds) {
   for (const it of spec.items || []) {
     if (it.kind === "quote") {
       blocks.push({ type: "quote", quote: { rich_text: notionRich(it.text) } });
+    } else if (it.kind === "note") {
+      blocks.push({ type: "paragraph", paragraph: { rich_text: notionRich(it.text) } });
     } else if (it.kind === "image") {
       const id = imageIds[imgIdx++];
-      if (id) blocks.push({ type: "image", image: { type: "file_upload", file_upload: { id } } });
+      if (id) {
+        const image = { type: "file_upload", file_upload: { id } };
+        // 노션 이미지 블록의 네이티브 캡션 — 실제 노션에서 사진 바로 아래 캡션으로 붙는다.
+        if (it.caption && it.caption.trim()) image.caption = notionRich(it.caption);
+        blocks.push({ type: "image", image });
+      }
     }
   }
   // AI 요약 (포함 선택 시에만 spec.summary 가 채워져 옴)

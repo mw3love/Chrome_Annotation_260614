@@ -2,9 +2,23 @@
 
 > 다른 PC에서 이어서 작업할 때 전후사정을 파악하기 위한 메모. (Claude는 세션 간 대화를 기억하지 못하므로 이 파일로 맥락을 넘긴다.)
 
-## 최종 업데이트: 2026-06-15
+## 최종 업데이트: 2026-06-17
 
-## 1. 이번 작업: 다중 PC 같은 Notion DB 연결 (0.3.1) — commit `0e1ca7b` 이후
+## 0. 이번 작업: 노트·캡션·영상 캡처 (0.6.0) — 최신
+
+`src/content/content.js`·`content.css`·`src/background/worker.js`. **상태: 미검증(실유튜브·실노션 확인 필요).** 헤드리스로 재현 불가한 항목이라 다른 PC/현재 PC에서 직접 확인 후 검증완료로 갱신할 것.
+
+- **유튜브 드래그 격리**: 네모 모드의 pointer/mouse down·up을 `window` 캡처 단계에서 `stopImmediatePropagation` → 정지 영상이 드래그로 재생되던 버그 차단. 트레일링 click도 기존대로 무효화.
+- **개인 노트(주석 사이 메모)**: 정리 패널 항목 사이/상단 `+ 노트`(hover) 인라인 삽입 + **하단 상시 입력창**(`.ca-note-composer`, panel-body 밖 형제라 재렌더에 안 지워짐, `flex-shrink:0`). Enter=끝에 추가, Shift+Enter=줄바꿈, 한글은 `isComposing` 가드로 Enter 2회(확정+제출). **▲▼로 순서 변경**. 노트 데이터모델: `{type:"note", id, text, afterId}` — afterId=가장 가까운 윗 형광펜/네모 id(없으면 null), 같은 앵커끼리는 배열 순서. `collectSorted`가 위빙.
+- **이미지 캡션**: 정리 패널 이미지 아래 `.ca-cap` 편집칸 → `rect.caption`. 내보내기: 노션 이미지 블록 네이티브 `caption`(worker `notionExportBlocks`) + PDF `figcaption`.
+- **입력칸 키 격리(`swallowTypingKeys`)**: 우리 편집칸(노트·캡션·입력창) 타이핑 시 키를 페이지로 안 흘림(유튜브 스페이스=재생 차단). 단 Alt/Ctrl/Meta 조합은 통과 → 입력 중에도 Alt+숫자 단축키 동작(단축키 핸들러도 `typing && !altKey`로 완화).
+- **영상 인식 캡처**: 박스 중심이 `<video>` 위면(`videoUnder`) → `ann.videoTime`(=currentTime)·`videoIdx`·`videoTop` 기록, 박스는 캡처 후 제거(페이지에 안 남김). `collectSorted` 정렬키 = (y, videoTime) — 영상 캡처는 영상 문서-Y로 묶이고 시간순(같은 영상은 첫 캡처 videoTop 재사용 → 스크롤/미니플레이어에도 안 흩어짐). 패널에 `▶ mm:ss` 배지(클릭 시 `video.currentTime=t` + scrollIntoView). 내보내기 캡션 앞에 `[mm:ss]`.
+- **확장 OFF(브라우저 아이콘 토글)**: `document.documentElement`에 `ca-ext-off` → CSS로 `.ca-rect` 숨김·`.ca-hl` 배경 제거(텍스트 보존). 끌 때 `applyMode(null)`로 그리기 모드·커서·테두리 해제. 단축키 핸들러는 `extHidden`이면 early-return(꺼진 상태에서 백틱이 숨겨진 도구막대 기준 0,0으로 패널을 띄워 깨지던 버그 수정).
+
+### 배경 — 영상엔 기존 네모 모델이 부적합
+기존 네모는 page-Y 정렬·박스 유지라 정적 텍스트(기사·논문)엔 맞지만, 영상은 플레이어가 한 자리 고정+시간축이라 Y정렬이 뒤죽박죽이고 박스가 시청을 방해. → 영상 위에서만 시간축 모델로 자동 전환(기사용 네모는 그대로 유지, 추가 기능).
+
+## 1-old. 다중 PC 같은 Notion DB 연결 (0.3.1) — commit `0e1ca7b` 이후
 
 ### 배경
 - 기존: 내보내기 시 부모 페이지 아래 인박스 DB를 만들고 `data_source_id`를 **로컬 캐시**에 저장·재사용. 문제 — 다른 PC는 캐시가 없어 **같은 부모 페이지인데도 새 DB를 또 만든다.**
@@ -45,7 +59,7 @@
 - 옵션 페이지 CSS만 다크 팔레트로 교체(JS·구조 불변): 배경 `#1b1b1f`, 본문 글자 `#e4e4e7`, 입력/셀렉트 어두운 필드(`#2a2a2e`)+테두리(`#3a3a40`)+포커스 코랄 테두리, 보조 버튼 `#3a3a40`, 상태색 성공 `#4ade80`·오류 `#f87171`, 구분선 `#34343a`. 주 버튼 코랄(`#ff7f50`) 유지.
 
 ## 2. 다음 할 일 (대기 중)
-- (없음 — 현재까지 요청 모두 반영)
+- **0.6.0 실조건 검증** — 실유튜브에서: 정지영상 재생 안 됨 / 영상 캡처 시간순 정렬 / 박스 자동 제거 / `▶ mm:ss` 클릭 seek / 캡션 노션 사진 아래 표시 / 확장 OFF 시 주석 숨김·복원·드래그 무반응. 이상 시 후속 커밋으로 수정.
 
 ## 3. 해결된 이슈: Alt+2(네모) 단축키
 - 증상: 특정 PC에서 Alt+2만 안 먹음. **원인 = 다른 확장이 가로채기**(우리 코드 버그 아님 — 단축키는 content.js 페이지 레벨 keydown). 충돌 확장 끄니 해결.
