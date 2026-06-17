@@ -774,8 +774,23 @@
   // 확정되기 전까지 유튜브로 통과시켜 재생바 seek·버튼·재생토글이 동작하게 한다. 비영상(기사 등)은
   // 기존대로 즉시 억제. overVideoAtDown=pointerdown 시점의 영상 히트(또는 null), dragConfirmed=드래그 확정.
   let overVideoAtDown = null;
+  let pausedAtDown = null; // pointerdown 시점 영상의 paused 상태 — 드래그 확정 시 이 상태로 복원
   let dragConfirmed = false;
   const DRAG_THRESHOLD = 8; // px — 이 이상 움직여야 캡처 드래그로 확정(=최소 캡처 크기와 일치). 그 전엔 클릭.
+
+  // 방법 A 부작용 보정: 영상 위 드래그는 press(pointerdown/mousedown)를 유튜브로 통과시키므로
+  // 유튜브가 그 press 로 재생/정지를 토글할 수 있다. 드래그는 재생상태를 바꾸면 안 되므로,
+  // 무엇이 토글했든 pointerdown 시점 상태(paused)로 되돌린다. (단순 클릭에서는 호출하지 않음 → 토글 유지)
+  function restorePlayback(v, paused) {
+    if (!v || paused == null) return;
+    try {
+      if (paused && !v.paused) v.pause();
+      else if (!paused && v.paused) {
+        const p = v.play();
+        if (p && p.catch) p.catch(() => {});
+      }
+    } catch (_) {}
+  }
 
   // 네모 모드의 드래그 제스처가 페이지(예: 유튜브 영상의 클릭=재생토글)에 닿지 않도록
   // 포인터 다운/업을 캡처 단계에서 가로채 페이지로의 전파를 끊는다. (우리 mouse 핸들러는 그대로 동작)
@@ -784,6 +799,7 @@
     if (mode !== "rect" || isUI(e.target)) return;
     if (e.type === "pointerdown") {
       overVideoAtDown = videoUnderPoint(e.clientX, e.clientY); // 영상(컨트롤 포함) 위에서 시작했나
+      pausedAtDown = overVideoAtDown ? overVideoAtDown.v.paused : null; // 드래그 확정 시 복원할 기준
       dragConfirmed = !overVideoAtDown; // 비영상=즉시 확정(억제), 영상=클릭/드래그 구분 대기
     }
     if (e.type === "pointermove") {
@@ -854,6 +870,7 @@
     if (overVideoAtDown && !dragConfirmed && dragStart && mode === "rect") {
       if (Math.hypot(e.pageX - dragStart.x, e.pageY - dragStart.y) >= DRAG_THRESHOLD) {
         dragConfirmed = true; // 이후 swallowPointer 가 유튜브로의 전파(이동·업·클릭)를 차단
+        restorePlayback(overVideoAtDown.v, pausedAtDown); // 새어든 press 의 재생토글 즉시 되돌림(깜빡임 최소화)
         dragEl = document.createElement("div");
         dragEl.className = "ca-rect";
         document.documentElement.appendChild(dragEl);
@@ -866,9 +883,10 @@
     "mouseup",
     (e) => {
     if (!dragEl) {
-      // 영상 위 단순 클릭(드래그 미확정) — 유튜브가 click 으로 seek/버튼/재생 처리. 제스처 상태만 정리.
+      // 영상 위 단순 클릭(드래그 미확정) — 유튜브가 press/click 으로 seek/버튼/재생 처리(복원 안 함). 상태만 정리.
       dragStart = null;
       overVideoAtDown = null;
+      pausedAtDown = null;
       dragConfirmed = false;
       return;
     }
@@ -912,7 +930,13 @@
     }
     dragEl = null;
     dragStart = null;
+    // 방법 A 백업 복원: 늦게 반영된 재생토글까지 잡도록 지금 + 다음 틱에 한 번 더 pointerdown 상태로 되돌림.
+    const vDown = overVideoAtDown && overVideoAtDown.v;
+    const pDown = pausedAtDown;
+    restorePlayback(vDown, pDown);
+    setTimeout(() => restorePlayback(vDown, pDown), 0);
     overVideoAtDown = null;
+    pausedAtDown = null;
     dragConfirmed = false;
     // 드래그가 끝나면 브라우저가 click 을 한 번 더 쏜다 → 이미지/링크 팝업 방지로 1회 무효화
     suppressClick = true;

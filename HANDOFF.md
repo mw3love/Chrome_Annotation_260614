@@ -13,14 +13,19 @@
 - **스크롤 체이닝 방지**: `.ca-panel-body`·`.ca-note-composer`에 `overscroll-behavior: contain`(끝까지 스크롤해도 페이지 안 밀림).
 - 사용자 확인: 스크롤·클릭후스페이스·체이닝 모두 OK. 매니페스트 0.6.1.
 
-### (2) 네모 모드에서 유튜브 컨트롤 클릭 — **방법 A 구현됨(0.6.2), 미검증**
-- 문제: 네모 모드는 페이지 클릭을 전부 가로채 **재생바 seek·버튼 클릭이 유튜브에 안 닿음**.
-- **구현(A)** `content.js`: "단순 클릭은 유튜브로 통과 / 드래그만 캡처" — **단, 영상 위에서 시작한 제스처에만** 적용(비영상 기사 캡처는 클릭 통과 시 링크 이동 회귀라 기존 즉시억제 유지).
-  - `videoUnderPoint(cx,cy)` 추출(기존 `videoUnder(box)`가 호출). pointerdown 시점 `overVideoAtDown` 기록.
-  - 영상 위면 mousedown에서 preventDefault·stop 안 하고 통과(클릭 후보). mousemove에서 이동 `DRAG_THRESHOLD(8px)` 넘으면 `dragConfirmed`로 전환 + 박스 생성. `swallowPointer`는 영상 위 미확정 동안 통과, 확정 후 pointermove/up 차단(재생바 스크럽 취소). 드래그 끝 `suppressClick` 유지.
-  - 0.6.1의 클릭→수동 재생토글(`vc.v.play/pause/focus`) **제거**(유튜브 네이티브 클릭이 대신).
-- ⚠ **검증 미완 — 실유튜브 필수**: ① 재생바 클릭 seek·버튼 동작 ② **정지영상 드래그 시 재생 안 됨**(과거 회귀, pointerdown은 통과하므로 재생바 즉시-스크럽 요소는 실측 필요) ③ 영상 드래그 캡처 정상 ④ 기사 캡처 종전대로 ⑤ **영상 단순 클릭 후 스페이스로 재생/정지**(focus 제거했으므로 — 페이지 스크롤로 새면 회귀. `!dragEl` 분기에서 `videoUnderPoint`→`.focus()` 재추가로 보강).
-- 회귀 시 후퇴: 드래그 중 press까지 차단 보강, 또는 방법 B(유튜브 컨트롤 셀렉터만 통과)/C(현행).
+### (2) 네모 모드 유튜브 컨트롤 클릭 — **방법 A 구현·검증됨(0.6.2). 다음: 방법 B 하이브리드로 교체 예정(미세 깜빡임 제거)**
+
+**현 상태(0.6.2, 커밋됨 — `content.js`):** 방법 A + 재생상태 사후복원. 사용자 실유튜브 테스트 완료: seek·버튼·드래그캡처·기사캡처·클릭후스페이스 **모두 OK**. 정지영상 드래그 재생 회귀도 `restorePlayback`으로 잡음. **남은 결함 1개**: 클릭→드래그→뗌 과정에서 **미세하게 1프레임 재생 깜빡임**(소리 틱 + 영상 미세 이동).
+
+**왜 못 없애나(구조적 한계):** 방법 A는 클릭 통과를 위해 press(pointerdown/mousedown)를 유튜브로 흘린다 → 유튜브가 그 press로 **한 프레임 재생한 뒤** `restorePlayback`이 되돌리는 순서. 같은 이벤트를 "드래그인지 확인 후" 사후에 막을 수 없으므로(동기 전파) ≥1프레임 재생은 불가피. 복원을 당겨도 0프레임 안 됨.
+
+**다음 세션 작업 — 방법 B 하이브리드(사용자 승인됨):**
+- 핵심: **영상 본문(play-surface) press는 아예 차단**(유튜브가 재생 시작할 일 없음 → 깜빡임 0). **컨트롤(재생바·버튼)만 네이티브로 통과**시켜 seek·버튼 유지.
+- 본문 vs 컨트롤 구분은 `swallowPointer`의 `e.target`으로(pointerdown 시점 실제 타깃). 컨트롤 셀렉터 예: `.ytp-chrome-bottom, .ytp-chrome-top, .ytp-progress-bar-container, .ytp-progress-bar, .ytp-gradient-bottom, .ytp-chrome-controls, button, a, [role="slider"], [role="button"]` → `e.target.closest(...)` 매칭되면 **통과**(캡처·수동토글 안 함), 아니면 **본문**으로 보고 차단.
+- 본문 처리: 단순 클릭 → **우리가 직접 play/pause 토글 + `video.focus()`**(0.6.1 방식 복귀, `restorePlayback`/`pausedAtDown` 불필요해짐 → 제거). 드래그 → 기존대로 캡처(press 차단했으니 재생 안 됨, 깜빡임 0).
+- 비용/리스크: **유튜브 DOM 클래스 의존**(유튜브 구조 변경 시 셀렉터 보수). 컨트롤바 위 캡처는 불가(보통 불필요). 비유튜브 네이티브 컨트롤 영상은 seek 안 될 수 있음(본문 취급). → 0프레임 + seek 동시 유지엔 본문/컨트롤 구분이 필수이고 그 구분은 셀렉터 외 방법 없음(셀렉터 없이 0프레임 = seek 포기).
+- 교체 시 정리 대상: 현 A의 `overVideoAtDown` 미확정-통과 로직, `pausedAtDown`/`restorePlayback`, `DRAG_THRESHOLD` 기반 지연확정 — B에선 press를 바로 차단하므로 단순화됨. `videoUnderPoint`는 본문 판정에 재사용 가능.
+- 후퇴 옵션: 방법 C(클릭 통과 포기, 깜빡임·셀렉터 의존 모두 없으나 seek 불가 — 애초 문제로 회귀).
 
 ## 0. 직전 작업: 노트·캡션·영상 캡처 (0.6.0) — 푸쉬됨(884a709)
 
