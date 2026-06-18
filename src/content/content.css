@@ -29,7 +29,7 @@ html.ca-ext-off .ca-hl {
   cursor: crosshair !important;
 }
 
-/* 영상 위 자석 강조 — 호버 시 영상 전체 사각형을 잡아 보여줌(클릭=전체 캡처). 이벤트는 안 받음. */
+/* 영상 위 자석 강조 — 호버 시 영상 전체 사각형을 잡아 보여줌(캡처는 우상단 📷 버튼). 이벤트는 안 받음. */
 .ca-magnet {
   position: absolute;
   border: 2px dashed #e23b3b;
@@ -37,6 +37,56 @@ html.ca-ext-off .ca-hl {
   box-sizing: border-box;
   z-index: 2147483645; /* .ca-rect 보다 한 단계 아래(드래그 박스가 위) */
   pointer-events: none;
+}
+
+/* 자석 위 📷 캡처 버튼 — 영상 우상단 모서리. 클릭=영상 전체 캡처, 드래그=버튼 이동. */
+.ca-capbtn {
+  position: absolute;
+  z-index: 2147483646; /* 자석보다 위(클릭을 받아야 함) */
+  display: none; /* JS 가 호버 시 flex 로 표시 */
+  align-items: center;
+  justify-content: center;
+  width: 40px; /* 아이콘 전용 정사각형 */
+  height: 40px;
+  padding: 0;
+  margin: 0;
+  line-height: 1;
+  color: #fff !important; /* 호스트 사이트(유튜브) button 색 누수 방지 */
+  border: none;
+  border-radius: 12px;
+  background: rgba(192, 57, 43, 0.92) !important; /* 코랄 — Notion 액션 버튼과 같은 색 계열 */
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  cursor: grab;
+  user-select: none;
+  /* left/top 은 즉시 반영(트랜지션 X) — 호버 시 외형만 부드럽게. */
+  transition: transform 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
+}
+.ca-capbtn .ca-capbtn-ico {
+  display: inline-flex;
+  font-size: 22px;
+  line-height: 1;
+}
+.ca-capbtn .ca-hov {
+  display: none; /* 기본은 📷, 호버 시 📸 로 교체 */
+}
+/* 드라마틱 호버 — 아이콘 교체 + 확대 + 흰색 글로우 링 + 밝은 코랄 */
+.ca-capbtn:hover {
+  background: #ff5a3c !important;
+  transform: scale(1.12);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.9), 0 6px 16px rgba(0, 0, 0, 0.5);
+}
+.ca-capbtn:hover .ca-capbtn-ico {
+  font-size: 25px;
+}
+.ca-capbtn:hover .ca-def {
+  display: none;
+}
+.ca-capbtn:hover .ca-hov {
+  display: inline-flex;
+}
+.ca-capbtn:active {
+  cursor: grabbing;
+  transform: scale(1.04);
 }
 
 /* 떠있는 도구막대 */

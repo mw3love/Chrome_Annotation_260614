@@ -576,7 +576,10 @@
   }
 
   const isUI = (node) =>
-    bar.contains(node) || tools.contains(node) || panel.contains(node);
+    bar.contains(node) ||
+    tools.contains(node) ||
+    panel.contains(node) ||
+    (captureBtn && captureBtn.contains(node));
 
   function applyMode(m) {
     mode = m;
@@ -884,26 +887,15 @@
     const box = boxOf(e);
     if (box.w < 8 || box.h < 8) {
       dragEl.remove(); // 너무 작으면 취소(=단순 클릭).
-      // 영상 본문 단순 클릭 → 자석 캡처: 영상 전체 사각형을 그대로 캡처한다.
-      // (이전엔 재생/정지 토글이었음 — 재생/정지는 스페이스바·유튜브 재생바로 대체.)
+      // 영상 본문 단순 클릭 → 재생/정지 토글(+영상 포커스로 방향키 탐색 유지).
+      // (영상 전체 캡처는 호버 시 뜨는 📷 버튼으로 분리 — 본문 클릭이 캡처를 오발동하던 문제 제거.)
       if (videoBodyAtDown) {
-        const r = videoBodyAtDown.getBoundingClientRect();
-        const fullBox = {
-          x: r.left + window.scrollX,
-          y: r.top + window.scrollY,
-          w: r.width,
-          h: r.height,
-        };
-        const boxEl = document.createElement("div"); // 캡처되는 영역을 잠깐 보여주는 박스(영상이라 캡처 후 제거됨)
-        boxEl.className = "ca-rect";
-        Object.assign(boxEl.style, {
-          left: fullBox.x + "px",
-          top: fullBox.y + "px",
-          width: fullBox.w + "px",
-          height: fullBox.h + "px",
-        });
-        document.documentElement.appendChild(boxEl);
-        commitRectCapture(fullBox, boxEl);
+        const v = videoBodyAtDown;
+        if (v.paused) v.play().catch(() => {});
+        else v.pause();
+        try {
+          v.focus({ preventScroll: true });
+        } catch {}
       }
     } else {
       commitRectCapture(box, dragEl);
@@ -939,21 +931,27 @@
     };
   }
 
-  // ---------- 영상 위 자석(전체 캡처) 강조 ----------
-  // 네모 모드에서 드래그 없이 영상에 마우스를 올리면 영상 전체 사각형을 강조해
-  // "클릭하면 이 영상 전체가 캡처된다"를 시각적으로 알린다. 드래그(부분 캡처)는 그대로.
+  // ---------- 영상 위 📷 캡처 버튼 + 점선 강조 ----------
+  // 네모 모드에서 영상에 마우스를 올리면 우상단 모서리에 📷 버튼을 띄운다. 그 버튼에 마우스를
+  // 올리면 비로소 영상 전체 사각형을 점선 강조해 "이 영역이 캡처된다"를 보여준다(직관성). 버튼
+  // 클릭 = 영상 전체 1장 캡처(영상 본문 클릭은 재생/정지). 버튼은 드래그로 이동 가능하고 위치는 저장된다.
   let magnetEl = null;
-  function hideMagnet() {
+  let magnetVideo = null; // 현재 자석이 가리키는 {v, idx}
+  let captureBtn = null; // 자석 위 📷 캡처 버튼(처음 필요할 때 생성)
+  let captureBtnDragging = false; // 버튼 드래그 중 — updateMagnet 이 버튼을 숨기지 않게
+  let captureBtnOffset = { dx: 0, dy: 0 }; // 영상 우상단 기준 이동 오프셋(드래그로 변경·저장)
+  chrome.storage.local.get("ca_capbtn_offset").then(({ ca_capbtn_offset }) => {
+    if (ca_capbtn_offset) captureBtnOffset = ca_capbtn_offset;
+  });
+
+  function removeMagnetOutline() {
     if (magnetEl) {
       magnetEl.remove();
       magnetEl = null;
     }
   }
-  function updateMagnet(e) {
-    if (mode !== "rect" || dragEl || isUI(e.target)) return hideMagnet();
-    const vid = videoUnderPoint(e.clientX, e.clientY);
-    if (!vid) return hideMagnet();
-    const r = vid.v.getBoundingClientRect();
+  // 영상 점선 강조 — 버튼 위에 올렸을 때만 "이 영역이 캡처된다"를 보여준다. r = 영상 뷰포트 사각형.
+  function showMagnetOutline(r) {
     if (!magnetEl) {
       magnetEl = document.createElement("div");
       magnetEl.className = "ca-magnet";
@@ -965,6 +963,123 @@
       width: r.width + "px",
       height: r.height + "px",
     });
+  }
+  function hideMagnet() {
+    removeMagnetOutline();
+    magnetVideo = null;
+    if (captureBtn) captureBtn.style.display = "none";
+  }
+
+  function ensureCaptureBtn() {
+    if (captureBtn) return captureBtn;
+    captureBtn = document.createElement("button");
+    captureBtn.className = "ca-capbtn";
+    captureBtn.type = "button";
+    // 아이콘 전용 — 호버 시 이모지만 📷→📸 로 교체(폭 불변 → 위치 안 들썩임).
+    captureBtn.innerHTML =
+      '<span class="ca-capbtn-ico">' +
+      '<span class="ca-def">📷</span><span class="ca-hov">📸</span></span>';
+    captureBtn.title = "이 영상 전체를 캡처 (드래그하면 버튼 이동)";
+    captureBtn.style.display = "none";
+    document.documentElement.appendChild(captureBtn);
+    wireCaptureBtn();
+    return captureBtn;
+  }
+
+  // 버튼 위치: 영상 우상단 모서리 안쪽 + 저장된 이동 오프셋. r = 영상 뷰포트 사각형.
+  function positionCaptureBtn(r) {
+    if (!captureBtn) return;
+    const bw = captureBtn.offsetWidth || 34;
+    captureBtn.style.left =
+      r.right - bw - 8 + window.scrollX + captureBtnOffset.dx + "px";
+    captureBtn.style.top = r.top + 8 + window.scrollY + captureBtnOffset.dy + "px";
+  }
+
+  // 버튼: 단순 클릭 = 캡처, 드래그(>5px) = 이동(오프셋 저장). 포인터 캡처로 영상 밖까지 끌 수 있음.
+  function wireCaptureBtn() {
+    let down = null;
+    let moved = false;
+    captureBtn.addEventListener("pointerdown", (e) => {
+      e.stopPropagation();
+      down = { x: e.clientX, y: e.clientY, dx: captureBtnOffset.dx, dy: captureBtnOffset.dy };
+      moved = false;
+      try {
+        captureBtn.setPointerCapture(e.pointerId);
+      } catch {}
+    });
+    captureBtn.addEventListener("pointermove", (e) => {
+      if (!down) return;
+      const ddx = e.clientX - down.x;
+      const ddy = e.clientY - down.y;
+      if (!moved && Math.hypot(ddx, ddy) > 5) {
+        moved = true;
+        captureBtnDragging = true; // 이제부터 updateMagnet 이 버튼을 숨기지 않게
+      }
+      if (moved) {
+        captureBtnOffset = { dx: down.dx + ddx, dy: down.dy + ddy };
+        if (magnetVideo) positionCaptureBtn(magnetVideo.v.getBoundingClientRect());
+      }
+    });
+    captureBtn.addEventListener("pointerup", (e) => {
+      if (!down) return;
+      try {
+        captureBtn.releasePointerCapture(e.pointerId);
+      } catch {}
+      const wasMoved = moved;
+      down = null;
+      moved = false;
+      captureBtnDragging = false;
+      if (wasMoved) chrome.storage.local.set({ ca_capbtn_offset: captureBtnOffset });
+      else triggerVideoCapture();
+    });
+    // 클릭(캡처/이동 직후 따라오는 click)이 페이지로 새지 않도록 무효화.
+    captureBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+    });
+  }
+
+  // 📷 버튼 클릭 → 현재 자석이 가리키는 영상 전체를 1장 캡처.
+  function triggerVideoCapture() {
+    if (!magnetVideo) return;
+    const r = magnetVideo.v.getBoundingClientRect();
+    const fullBox = {
+      x: r.left + window.scrollX,
+      y: r.top + window.scrollY,
+      w: r.width,
+      h: r.height,
+    };
+    const boxEl = document.createElement("div"); // 캡처 영역을 잠깐 보여주는 박스(영상이라 캡처 후 제거됨)
+    boxEl.className = "ca-rect";
+    Object.assign(boxEl.style, {
+      left: fullBox.x + "px",
+      top: fullBox.y + "px",
+      width: fullBox.w + "px",
+      height: fullBox.h + "px",
+    });
+    document.documentElement.appendChild(boxEl);
+    commitRectCapture(fullBox, boxEl);
+  }
+
+  function updateMagnet(e) {
+    if (mode !== "rect" || dragEl) return hideMagnet();
+    if (captureBtnDragging) return; // 버튼 드래그 중엔 상태 유지(숨기지 않음)
+    if (isUI(e.target)) {
+      // 📷 버튼 위 → 캡처될 영역(영상 점선)을 표시. 그 외 우리 UI 위면 전체 숨김.
+      if (captureBtn && captureBtn.contains(e.target) && magnetVideo) {
+        showMagnetOutline(magnetVideo.v.getBoundingClientRect());
+        return;
+      }
+      return hideMagnet();
+    }
+    // 영상 위(버튼 아님) → 버튼만 노출하고 점선은 숨김(버튼에 올려야 점선이 뜸).
+    const vid = videoUnderPoint(e.clientX, e.clientY);
+    if (!vid) return hideMagnet();
+    magnetVideo = vid;
+    removeMagnetOutline();
+    ensureCaptureBtn();
+    captureBtn.style.display = "flex";
+    positionCaptureBtn(vid.v.getBoundingClientRect());
   }
 
   // 그린(또는 자석으로 만든) box 를 주석으로 추가하고 즉시 캡처한다. 드래그·영상클릭 양쪽에서 재사용.
@@ -1038,45 +1153,65 @@
     });
   }
 
+  // 캡처 직전 우리 오버레이(자석 점선·📷 버튼)를 잠깐 숨긴다 → captureVisibleTab(실제 스크린샷)에
+  // 박히지 않게. 빨간 캡처 박스(.ca-rect)는 기존대로 테두리만 crop 하므로 숨기지 않는다.
+  function setCaptureOverlaysHidden(hidden) {
+    const v = hidden ? "hidden" : "";
+    if (magnetEl) magnetEl.style.visibility = v;
+    if (captureBtn && captureBtn.style.display !== "none") captureBtn.style.visibility = v;
+  }
+
   // 화면을 찍어(captureVisibleTab) box 안쪽만 잘라 PNG dataURL 로 돌려준다.
-  // 숨김/복원 없이, box 자기 테두리(BORDER px)만큼 안쪽을 잘라 빨간 테두리를 제외한다.
+  // box 자기 테두리(BORDER px)만큼 안쪽을 잘라 빨간 테두리를 제외하고, 자석·📷 오버레이는 숨긴 뒤 찍는다.
   const BORDER = 2; // .ca-rect 테두리 두께(px)와 일치
   function captureRegion(box) {
     return new Promise((resolve, reject) => {
-      const sx = window.scrollX;
-      const sy = window.scrollY;
-      chrome.runtime.sendMessage({ type: "capture" }, (resp) => {
-        if (chrome.runtime.lastError) return reject(chrome.runtime.lastError);
-        if (!resp || resp.error || !resp.dataUrl)
-          return reject(new Error((resp && resp.error) || "no data"));
-        const img = new Image();
-        img.onload = () => {
-          const dpr = window.devicePixelRatio || 1;
-          const cx = box.x + BORDER;
-          const cy = box.y + BORDER;
-          const cw = Math.max(1, box.w - BORDER * 2);
-          const ch = Math.max(1, box.h - BORDER * 2);
-          const canvas = document.createElement("canvas");
-          canvas.width = Math.round(cw * dpr);
-          canvas.height = Math.round(ch * dpr);
-          canvas
-            .getContext("2d")
-            .drawImage(
-              img,
-              (cx - sx) * dpr,
-              (cy - sy) * dpr,
-              cw * dpr,
-              ch * dpr,
-              0,
-              0,
-              canvas.width,
-              canvas.height
-            );
-          resolve(canvas.toDataURL("image/png"));
-        };
-        img.onerror = () => reject(new Error("image load fail"));
-        img.src = resp.dataUrl;
-      });
+      setCaptureOverlaysHidden(true);
+      const done = (cb) => (arg) => {
+        setCaptureOverlaysHidden(false);
+        cb(arg);
+      };
+      const ok = done(resolve);
+      const fail = done(reject);
+      // 숨김이 화면에 반영(리페인트)되도록 2프레임 기다린 뒤 캡처 요청.
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          const sx = window.scrollX;
+          const sy = window.scrollY;
+          chrome.runtime.sendMessage({ type: "capture" }, (resp) => {
+            if (chrome.runtime.lastError) return fail(chrome.runtime.lastError);
+            if (!resp || resp.error || !resp.dataUrl)
+              return fail(new Error((resp && resp.error) || "no data"));
+            const img = new Image();
+            img.onload = () => {
+              const dpr = window.devicePixelRatio || 1;
+              const cx = box.x + BORDER;
+              const cy = box.y + BORDER;
+              const cw = Math.max(1, box.w - BORDER * 2);
+              const ch = Math.max(1, box.h - BORDER * 2);
+              const canvas = document.createElement("canvas");
+              canvas.width = Math.round(cw * dpr);
+              canvas.height = Math.round(ch * dpr);
+              canvas
+                .getContext("2d")
+                .drawImage(
+                  img,
+                  (cx - sx) * dpr,
+                  (cy - sy) * dpr,
+                  cw * dpr,
+                  ch * dpr,
+                  0,
+                  0,
+                  canvas.width,
+                  canvas.height
+                );
+              ok(canvas.toDataURL("image/png"));
+            };
+            img.onerror = () => fail(new Error("image load fail"));
+            img.src = resp.dataUrl;
+          });
+        })
+      );
     });
   }
 
