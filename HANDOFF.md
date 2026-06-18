@@ -2,9 +2,25 @@
 
 > 다른 PC에서 이어서 작업할 때 전후사정을 파악하기 위한 메모. (Claude는 세션 간 대화를 기억하지 못하므로 이 파일로 맥락을 넘긴다.)
 
-## 최종 업데이트: 2026-06-18 (0.6.5 Notion 버튼 시각 차별화 반영 — 아래 ★ 먼저 읽을 것)
+## 최종 업데이트: 2026-06-19 (0.7.0 영상 자석 캡처 + Notion DB 선택/검색 재작성 — 아래 ★ 먼저 읽을 것)
 
 ## ★ 진행 중 / 다음 작업 (새 세션은 여기부터)
+
+### (NEW) 0.7.0 — 영상 자석 캡처 + Notion DB 선택/검색 재작성 (사용자 실조건 확인)
+
+**A) 영상 위 자석 캡처 (`content.js`·`content.css`)**
+- 네모 모드에서 영상에 마우스를 올리면(드래그 X) 영상 전체 사각형에 **빨강 점선 자석 강조**(`.ca-magnet`, `pointer-events:none`, 채움 없음 — 시청 방해 최소화). `updateMagnet`/`hideMagnet`, mousemove에서 갱신, 드래그 시작·모드 이탈 시 제거.
+- **영상 본문 단순 클릭 = 영상 전체 1장 캡처**(영상 전체 box를 만들어 기존 캡처 경로로). 드래그 = 기존처럼 부분 캡처.
+- ⚠ **동작 변경**: 이전 (1)·(2)의 "영상 본문 클릭 → 재생/정지 토글 + `video.focus()`"는 **제거**됨(클릭을 캡처에 할당). 재생/정지는 **스페이스바·유튜브 재생바**로. (보류된 [제안]: 캡처 후 `video.focus()` 복원하면 방향키 탐색 유지 — 미적용.)
+- 캡처 경로 추출: 기존 mouseup의 캡처 분기를 `commitRectCapture(box, boxEl)`로 빼내 드래그·클릭 양쪽이 공용.
+- 자석은 재생바(컨트롤) 위에도 뜨지만 그 위 클릭은 캡처가 아니라 seek(`overControlAtDown` 통과) — 사용자 "불편하지 않음"으로 현 상태 유지.
+
+**B) Notion DB 선택/검색 재작성 (`worker.js`·`content.js`) — 1-old(0.3.1) 접근법 대체**
+- **근본 버그**: 0.3.1의 "부모 페이지 직속 `child_database` 스캔(제목 매칭)"은 **열(column)·토글 안에 중첩된 원본 DB를 못 봐서** 매번 페이지 최상위에 새 DB를 만들었음(사용자 대시보드: 원본이 좌측 열 안에 중첩 → 바닥에 중복 생성). 사진+코드로 확정.
+- **교체**: ① 탐색을 **Notion Search API**로(`notionSearchInboxDataSources`, `POST /search` `filter:{property:"object",value:"data_source"}` — 2026-03-11은 database가 아니라 **data_source** 반환, 그 id가 곧 행 부모 `data_source_id`). 중첩과 무관하게 찾음. 결과는 조상 페이지(`notionAncestorPageId` — data_source→database→block→page 추적, 최대 6홉)로 부모 한정(못 풀면 관대 포함). ② **활성 DB 포인터를 `storage.sync`에 저장**(`notionGetActive`/`notionSetActive` — `notion_active_ds_id`/`_db_id`/`_parent`) → 같은 크롬 계정 PC 간 공유. ③ **내보내기 패널에 DB 선택 단계**: `내보내기 → [DB 선택 / + 새 DB(선택적 라벨)] → [분류] → 저장`(`showNotionDbStep`/`renderNotionDbStep`, 메시지 `notion-list-dbs`/`notion-create-db`/`notion-set-active-db`). 활성 DB 미리 선택돼 평소엔 그냥 통과.
+- **제거된 함수**(검색이 ds id 직접 제공): `notionListChildDatabases`·`notionFindInboxDatabases`·`notionDataSourceIdOf`. `notionGetOrCreateDatabase`는 활성포인터→로컬캐시→검색 순. `notionConnect`/`notionPickDatabase`도 검색+활성포인터 기반.
+- 새 DB 제목 = `"Reading Highlighter 인박스"` + 선택적 `" — 라벨"`(접두 유지 → 검색·스키마 호환). 목록은 접두 일치 data_source만 표시.
+- **검증**: DB 목록에 원본+중복 노출·원본 선택 후 내보내기 = **사용자 실조건 확인(2026-06-19)**. PC 간 sync 전파는 크롬 '동기화 사용' ON 필요(2번째 PC는 추후 확인). 폴백 모서리: `notion-list-dbs` 실패 시 분류 단계로 폴백하나 검색 2건이면 "모호" 에러로 막힐 수 있음(정상 경로에선 무관).
 
 ### (1) 0.6.1 — `content.js`·`content.css` (커밋됨, 푸쉬됨)
 사용자 확인 완료 후 커밋. 내용:
@@ -55,7 +71,9 @@
 ### 배경 — 영상엔 기존 네모 모델이 부적합
 기존 네모는 page-Y 정렬·박스 유지라 정적 텍스트(기사·논문)엔 맞지만, 영상은 플레이어가 한 자리 고정+시간축이라 Y정렬이 뒤죽박죽이고 박스가 시청을 방해. → 영상 위에서만 시간축 모델로 자동 전환(기사용 네모는 그대로 유지, 추가 기능).
 
-## 1-old. 다중 PC 같은 Notion DB 연결 (0.3.1) — commit `0e1ca7b` 이후
+## 1-old. 다중 PC 같은 Notion DB 연결 (0.3.1) — commit `0e1ca7b` 이후  ⚠ **SUPERSEDED by 0.7.0**
+
+> ⚠ 이 절의 "제목으로 직속 `child_database` 탐색" 방식은 **중첩(열/토글) DB를 못 찾는 결함**이 발견돼 0.7.0에서 **Search API + storage.sync 활성 포인터 + 내보내기 패널 DB 선택**으로 대체됨(상단 ★ (NEW) 참조). 아래 기록은 히스토리로만 보존.
 
 ### 배경
 - 기존: 내보내기 시 부모 페이지 아래 인박스 DB를 만들고 `data_source_id`를 **로컬 캐시**에 저장·재사용. 문제 — 다른 PC는 캐시가 없어 **같은 부모 페이지인데도 새 DB를 또 만든다.**
@@ -96,7 +114,9 @@
 - 옵션 페이지 CSS만 다크 팔레트로 교체(JS·구조 불변): 배경 `#1b1b1f`, 본문 글자 `#e4e4e7`, 입력/셀렉트 어두운 필드(`#2a2a2e`)+테두리(`#3a3a40`)+포커스 코랄 테두리, 보조 버튼 `#3a3a40`, 상태색 성공 `#4ade80`·오류 `#f87171`, 구분선 `#34343a`. 주 버튼 코랄(`#ff7f50`) 유지.
 
 ## 2. 다음 할 일 (대기 중)
-- (없음) — 0.6.0~0.6.3 및 Notion DB 재사용 경로까지 **모두 실조건 검증 완료(2026-06-17)**. 검증된 항목: 정지영상 재생 안 됨 / 영상 캡처 시간순 정렬 / 박스 자동 제거 / `▶ mm:ss` 클릭 seek / 캡션 노션 사진 아래 표시 / 확장 OFF 숨김·복원·드래그 무반응 / 방법 B 영상 캡처 깜빡임 0 / 형광펜 패널 스크롤 / Notion 다중 PC 같은 DB 재사용.
+- **0.7.0 후속(선택)**: ① 영상 클릭 캡처 후 `video.focus()` 복원(방향키 탐색) — 보류된 [제안]. ② Notion PC 간 sync 전파 2번째 PC 실확인. ③ 자석이 컨트롤바 위 표시되는 것 거슬리면 `VIDEO_CONTROL_SEL`에서 숨김.
+- 0.6.0~0.6.5 항목은 실조건 검증 완료(2026-06-17~19): 정지영상 재생 안 됨 / 영상 캡처 시간순 정렬 / 박스 자동 제거 / `▶ mm:ss` 클릭 seek / 캡션 노션 사진 아래 표시 / 확장 OFF 숨김·복원·드래그 무반응 / 방법 B 영상 캡처 깜빡임 0 / 형광펜 패널 스크롤 / **영상 자석 클릭 캡처(0.7.0)** / **Notion DB 선택·검색 재사용(0.7.0)**.
+- ⚠ 정정: 구 "Notion 다중 PC 같은 DB 재사용(0.3.1)"은 중첩 DB 결함으로 0.7.0에서 대체됨(위 1-old 참조). 0.3.1을 "검증 완료"로 본 기존 기록은 중첩 구조 케이스를 놓친 것.
 
 ## 3. 해결된 이슈: Alt+2(네모) 단축키
 - 증상: 특정 PC에서 Alt+2만 안 먹음. **원인 = 다른 확장이 가로채기**(우리 코드 버그 아님 — 단축키는 content.js 페이지 레벨 keydown). 충돌 확장 끄니 해결.

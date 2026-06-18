@@ -49,8 +49,7 @@ options.html / options.js               # API 키 입력
   - 검증: 📝 Notion 버튼 → 부모 페이지 아래 DB에 행 생성, 주석·이미지·속성 저장 (실조건 확인)
 - [x] **6. UI/UX 개편 (0.3.0)** — '정리·AI' 통합 패널(하위탭: 주석 정리 / AI 요약), 주석 정리 실시간 반영, AI 요약 결과 캐시 + 🔄 다시하기, 전체삭제를 hover 미니툴바로 통합, 단축키 Alt+1~5(백틱=툴바 토글)
   - 검증: 통합 패널 토글·실시간 반영·캐시 동작, 주석정리 순서 == Notion 본문 순서
-- [~] **7. 다중 PC 같은 DB 연결 (0.3.1)** — DB 확보 시 로컬 캐시 없으면 부모 페이지에서 기존 인박스 DB(제목 매칭)를 탐색해 0개=생성/1개=재사용/2개+=옵션 페이지에서 선택. 다른 PC도 같은 부모 페이지 ID 면 같은 DB 에 연결됨(로컬 캐시 비의존).
-  - 검증: 신규생성 경로 실조건 확인(현재 PC). **재사용 경로(2번째 PC) 미검증** — 2026-06-15 저녁 예정.
+- [~] **7. 다중 PC 같은 DB 연결 (0.3.1)** ⚠ **0.7.0에서 대체** — DB 확보 시 로컬 캐시 없으면 부모 페이지에서 기존 인박스 DB(제목 매칭)를 탐색해 0개=생성/1개=재사용/2개+=옵션 페이지에서 선택. **결함**: 직속 `child_database`만 스캔 → 열/토글 안 중첩 DB를 못 찾아 중복 생성. → 12번(Search API+sync+패널 선택)으로 교체.
 - [x] **8. UX 다듬기 (0.4.0)** — 첫 주석 작성 시 도구막대 펼침+정리 탭 자동 표시(1회), 도구막대 ⠿ 손잡이 하나로 도구막대+패널 함께 이동(패널 자체 핸들 제거, 접힘 중에도 동행), 패널 가로폭=도구막대 폭(좌·우변 정렬), 전체삭제(🗑)를 hover 미니툴바 → 정리 탭 헤더로 이동, 주석 정리 패널에서 항목별 ✕ 개별 삭제. 단축키 재편: 백틱=도구막대 접기/펼치기(처음 펼칠 때만 형광펜 ON), Alt+1~4(형광펜·네모·정리·Notion), AI 요약 단축키(구 Alt+5) 제거.
   - 검증: 실조건 확인(현재 PC) — 자동펼침·동행 이동·폭 맞춤·삭제 UX·단축키 동작.
 - [x] **9. 내보내기 시 분류 선택 (0.5.0)** — 📝 Notion 누르면 바로 저장하지 않고, 인박스 DB의 `분류`(select) 옵션을 실시간 조회해 칩 버튼으로 보여주는 선택 패널을 먼저 띄움. 직접 입력으로 새 분류 즉석 생성(Notion이 없는 옵션 자동 생성), AI 요약 포함 여부도 같은 패널의 체크박스로 통합(구 confirm 제거). → 저장 후 Notion에서 분류 칸 누르는 수고 제거.
@@ -58,7 +57,9 @@ options.html / options.js               # API 키 입력
 - [~] **10. 노트·캡션·영상 캡처 (0.6.0)** — ① **유튜브 격리**: 네모 드래그 제스처를 캡처 단계 `stopImmediatePropagation`으로 페이지에서 차단(정지 영상이 재생 안 됨). ② **개인 노트**: 정리 패널 항목 사이 `+ 노트` 인라인 삽입 + **하단 상시 입력창**(Enter 추가, IME 조합은 `isComposing`으로 Enter 2회) + **▲▼ 순서 변경**(노트는 가장 가까운 윗 형광펜/네모에 앵커링). ③ **이미지 캡션**: 정리 패널 이미지 아래 캡션칸 → 노션 이미지 블록 **네이티브 `caption`** 연동(사진 아래 표시) + PDF figcaption. ④ **입력칸 키 격리**: 우리 편집칸 타이핑 시 키 이벤트를 페이지로 안 흘려 사이트 단축키(유튜브 스페이스=재생) 차단, 단 Alt/Ctrl/Meta 조합은 통과(우리 단축키 유지). ⑤ **영상 인식 캡처**: `<video>` 위 캡처면 `currentTime` 기록 → 타임스탬프 순 정렬(영상 문서-Y 1차·시간 2차 키, 같은 영상은 첫 캡처 Y 재사용), 박스 자동 제거, `▶ mm:ss` 배지 클릭 시 그 장면으로 seek, 내보내기에 `[mm:ss]`. ⑥ **확장 OFF**: 브라우저 아이콘으로 끄면 `html.ca-ext-off`로 페이지 형광펜·네모 숨김 + 그리기 모드 해제 + 단축키 무시(꺼진 상태 백틱 깨짐 수정).
   - 검증: **미검증(실유튜브·실노션 확인 필요)** — 정지영상 재생 안 됨 / 시간순 정렬 / 박스 사라짐 / seek / 캡션 노션 연동 / OFF 숨김·복원. 한계: cross-origin 임베드 iframe은 `currentTime` 접근 불가(youtube.com 직접 시청만).
 - [x] **11. UX 보완 (0.6.1)** — ① 영상 위 단순 클릭 → 재생/정지 토글 + 우리 입력칸 포커스 해제(스페이스가 영상으로). ② 새 캡처 시 정리 패널이 그 항목 캡션칸까지 자동 스크롤(이미지 로드 후 재정렬, panelBody만 스크롤해 페이지 점프 방지). ③ 정리 패널·입력창 `overscroll-behavior:contain`으로 스크롤 체이닝(끝에서 페이지 밀림) 방지.
-  - 검증: 스크롤·클릭후 스페이스·체이닝 실조건 확인(사용자). **다음(미구현): 네모 모드에서 유튜브 재생바·버튼 클릭 통과 — 방법 A(클릭 통과/드래그만 캡처) 승인됨. HANDOFF ★ 참조.**
+  - 검증: 스크롤·클릭후 스페이스·체이닝 실조건 확인(사용자). ⚠ ①의 "영상 클릭=재생토글"은 **0.7.0에서 "영상 클릭=전체 캡처"로 대체**(아래 12 참조).
+- [x] **12. 영상 자석 캡처 + Notion DB 선택/검색 재작성 (0.7.0)** — ① **영상 자석**: 네모 모드에서 영상에 호버하면 영상 전체에 빨강 점선 자석(`.ca-magnet`) 표시, **클릭=영상 전체 1장 캡처**(드래그=부분 캡처 유지). 재생/정지는 스페이스바·재생바로(클릭 토글 제거). ② **Notion DB 선택/검색**: 직속 스캔(중첩 DB 못 봄)을 Search API(`data_source`)로 교체, 활성 DB 포인터를 `storage.sync`로 PC 간 공유, 내보내기 패널에 DB 선택/새 DB 추가 단계 추가(7번 항목의 중첩 결함 해결). Notion 메모 절 참조.
+  - 검증: 자석 클릭 캡처·DB 목록/선택/내보내기 **사용자 실조건 확인(2026-06-19)**. PC 간 sync 전파는 추후 2번째 PC 확인.
 
 ## 게이트웨이 메모 (2026-06-13 실측)
 
@@ -71,7 +72,10 @@ options.html / options.js               # API 키 입력
 - API 호출은 전부 background worker 에서 (`api.notion.com` host_permissions 추가) → CORS 우회. Notion API 는 CORS 헤더 미제공이라 콘텐츠 스크립트 직접 호출 불가.
 - 헤더: `Notion-Version: 2026-03-11`. 인증: 옵션 페이지에 통합 토큰 + 부모 페이지(통합과 Connections 공유 필요) 입력.
 - **인박스 DB**: 첫 내보내기 때 부모 페이지 아래 DB 1회 자동 생성(`POST /databases` + `initial_data_source`), 응답의 `data_sources[0].id` 를 저장·재사용. 이후 저장은 행 생성(`parent.data_source_id` — 2025-09-03+ 부터 행 부모는 database_id 가 아니라 data_source_id). 속성: 제목·URL·저장일·분류(내보내기 패널에서 선택, 미선택 시 미분류)·하이라이트·네모·요약포함. 본문은 주석을 위치순 인터리브 + AI요약(선택)만 두고, URL·네모수는 속성에만(중복 제거).
-- **DB 확보·다중 PC 연결 (0.3.1)**: 로컬 캐시(`notion_data_source_id`+`notion_db_parent`) 우선 → 없으면 부모 페이지의 `child_database` 블록 중 제목 `Reading Highlighter 인박스` 매칭으로 탐색해 **0개=생성 / 1개=재사용+캐시 / 2개+=옵션 페이지에서 선택**(`notion-connect`/`notion-pick-db`). 덕분에 다른 PC도 같은 부모 페이지 ID 면 같은 DB 에 연결(로컬 캐시 비의존). 부모 페이지가 바뀌면 그 페이지 기준으로 다시 탐색.
+- **DB 확보·선택·다중 PC 연결 (0.7.0 — 0.3.1 대체)**: 구버전은 부모의 직속 `child_database` 블록을 제목 매칭으로 스캔했으나 **열(column)·토글 안 중첩 DB를 못 찾아** 매번 새 DB가 생기던 결함 → 다음으로 교체.
+  - **탐색 = Notion Search API**: `notionSearchInboxDataSources`가 `POST /search`(`filter:{property:"object",value:"data_source"}`)로 제목이 `Reading Highlighter 인박스`로 시작하는 **data_source**를 찾음(2026-03-11은 database가 아니라 data_source를 반환하며 그 id가 곧 행 부모 `data_source_id`). 중첩과 무관. 결과는 조상 페이지(`notionAncestorPageId`)로 부모 한정(못 풀면 관대 포함).
+  - **활성 DB 포인터 = `storage.sync`**(`notion_active_ds_id`/`_db_id`/`_parent`, `notionGetActive`/`notionSetActive`) → 같은 크롬 계정 PC 간 자동 공유(크롬 '동기화 사용' ON 시). 로컬 캐시는 폴백.
+  - **내보내기 패널에서 DB 선택/추가**: `내보내기 → [DB 선택 / + 새 DB(선택적 라벨 " — …")] → [분류] → 저장`(`showNotionDbStep`, 메시지 `notion-list-dbs`/`notion-create-db`/`notion-set-active-db`). `notionGetOrCreateDatabase`는 활성포인터→로컬캐시→검색(1=재사용/0=생성/2+=패널선택) 순. 제거된 함수: `notionListChildDatabases`·`notionFindInboxDatabases`·`notionDataSourceIdOf`.
 - 부모 페이지 ID 는 URL 맨 끝 32자리 hex(끝에서부터 추출) — 슬러그의 날짜 등 hex-유사 숫자가 ID 앞에 붙는 함정 주의. `?v=뷰ID` 쿼리도 먼저 제거.
 - 이미지: File Upload API 3단계(`POST /file_uploads` → `/send` 멀티파트 → image 블록의 `file_upload.id`). 페이지 children 은 요청당 100개 제한 → 초과분 PATCH append.
 - **클립보드 제약**: 붙여넣기(Ctrl+V)는 수동적이라 업로드를 못 일으킨다. Notion·한글은 클립보드 HTML 의 data-URI 이미지를 버림(Word만 받음). → 이미지를 두 앱에 넣으려면 실제 PNG(image/png) 클립보드(네모의 🖼 버튼, 1장씩) 또는 Notion API 업로드(📝 버튼)뿐.

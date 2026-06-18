@@ -584,6 +584,7 @@
       b.classList.toggle("active", b.dataset.mode === m)
     );
     const root = document.documentElement;
+    if (m !== "rect") hideMagnet(); // 네모 모드를 벗어나면 영상 자석 강조 제거
     root.classList.toggle("ca-rect-cursor", m === "rect");
     root.classList.toggle("ca-hl-cursor", m === "highlight"); // 형광펜 = I빔 커서
     // 화면 가장자리 신호(테두리+배지) — 어느 페이지서든 모드 활성 여부가 한눈에 보임
@@ -849,6 +850,7 @@
       const ae = document.activeElement;
       if (ae && ae.isContentEditable && isUI(ae)) ae.blur();
       dragStart = { x: e.pageX, y: e.pageY };
+      hideMagnet(); // 드래그(부분 캡처) 시작 → 자석 강조 제거
       e.preventDefault();
       e.stopImmediatePropagation();
       dragEl = document.createElement("div");
@@ -861,6 +863,7 @@
 
   document.addEventListener("mousemove", (e) => {
     if (dragEl) drawRect(e);
+    else updateMagnet(e); // 드래그 중이 아니면 영상 위 자석 강조 갱신
   });
 
   document.addEventListener(
@@ -881,51 +884,29 @@
     const box = boxOf(e);
     if (box.w < 8 || box.h < 8) {
       dragEl.remove(); // 너무 작으면 취소(=단순 클릭).
-      // 영상 본문 단순 클릭 → 우리가 직접 재생/정지 토글 + 영상 포커스(스페이스 등이 영상으로 가게).
-      // press 를 차단했으므로 유튜브는 토글하지 않음 → 우리 토글 1회만, 깜빡임 0.
+      // 영상 본문 단순 클릭 → 자석 캡처: 영상 전체 사각형을 그대로 캡처한다.
+      // (이전엔 재생/정지 토글이었음 — 재생/정지는 스페이스바·유튜브 재생바로 대체.)
       if (videoBodyAtDown) {
-        const v = videoBodyAtDown;
-        try {
-          if (v.paused) {
-            const p = v.play();
-            if (p && p.catch) p.catch(() => {});
-          } else v.pause();
-          v.focus({ preventScroll: true });
-        } catch (_) {}
+        const r = videoBodyAtDown.getBoundingClientRect();
+        const fullBox = {
+          x: r.left + window.scrollX,
+          y: r.top + window.scrollY,
+          w: r.width,
+          h: r.height,
+        };
+        const boxEl = document.createElement("div"); // 캡처되는 영역을 잠깐 보여주는 박스(영상이라 캡처 후 제거됨)
+        boxEl.className = "ca-rect";
+        Object.assign(boxEl.style, {
+          left: fullBox.x + "px",
+          top: fullBox.y + "px",
+          width: fullBox.w + "px",
+          height: fullBox.h + "px",
+        });
+        document.documentElement.appendChild(boxEl);
+        commitRectCapture(fullBox, boxEl);
       }
     } else {
-      const id = uid();
-      const vid = videoUnder(box); // 영상 위면 시간축 캡처로 전환
-      const ann = { type: "rect", id, rect: box, image: null };
-      if (vid) {
-        // 영상 캡처: 타임스탬프 기록, page-Y 대신 영상 문서-Y로 묶고 시간순 정렬. 박스는 안 남김.
-        ann.videoTime = vid.v.currentTime || 0;
-        ann.videoIdx = vid.idx;
-        // 같은 영상의 캡처는 첫 캡처의 Y를 재사용 → 스크롤·미니플레이어로 위치가 변해도 한 묶음 유지.
-        const prior = annotations.find(
-          (a) => a.type === "rect" && a.videoIdx === vid.idx && a.videoTop != null
-        );
-        ann.videoTop = prior ? prior.videoTop : vid.v.getBoundingClientRect().top + window.scrollY;
-      } else {
-        dragEl.dataset.caId = id; // 기사·논문: 박스를 페이지에 유지(형광펜 삭제 연동용)
-      }
-      annotations.push(ann);
-      refreshAnnotationsPanel(); // 네모 추가 즉시 반영(이미지는 캡처 후 한 번 더)
-      revealOnFirstAnnotation();
-      scrollPanelTo(id); // 방금 추가한 항목으로 패널 스크롤(확인 + 바로 캡션 입력)
-      const boxEl = dragEl; // 캡처 후 정리에 쓰려고 참조 보관
-      // 그린 영역을 즉시(조용히) 캡처해 주석에 저장 (저장 버튼/AI에서 재사용)
-      captureRegion(box)
-        .then((dataUrl) => {
-          ann.image = dataUrl;
-          if (vid) boxEl.remove(); // 영상: 캡처 끝나면 박스 제거(시청 방해·다음 캡처 혼동 방지)
-          refreshAnnotationsPanel();
-          scrollPanelTo(id); // 이미지·캡션칸이 생긴 뒤 다시 스크롤(캡션이 보이도록)
-        })
-        .catch((err) => {
-          if (vid) boxEl.remove();
-          console.warn("[주석] 캡처 실패:", err);
-        });
+      commitRectCapture(box, dragEl);
     }
     dragEl = null;
     dragStart = null;
@@ -956,6 +937,70 @@
       w: Math.abs(e.pageX - dragStart.x),
       h: Math.abs(e.pageY - dragStart.y),
     };
+  }
+
+  // ---------- 영상 위 자석(전체 캡처) 강조 ----------
+  // 네모 모드에서 드래그 없이 영상에 마우스를 올리면 영상 전체 사각형을 강조해
+  // "클릭하면 이 영상 전체가 캡처된다"를 시각적으로 알린다. 드래그(부분 캡처)는 그대로.
+  let magnetEl = null;
+  function hideMagnet() {
+    if (magnetEl) {
+      magnetEl.remove();
+      magnetEl = null;
+    }
+  }
+  function updateMagnet(e) {
+    if (mode !== "rect" || dragEl || isUI(e.target)) return hideMagnet();
+    const vid = videoUnderPoint(e.clientX, e.clientY);
+    if (!vid) return hideMagnet();
+    const r = vid.v.getBoundingClientRect();
+    if (!magnetEl) {
+      magnetEl = document.createElement("div");
+      magnetEl.className = "ca-magnet";
+      document.documentElement.appendChild(magnetEl);
+    }
+    Object.assign(magnetEl.style, {
+      left: r.left + window.scrollX + "px",
+      top: r.top + window.scrollY + "px",
+      width: r.width + "px",
+      height: r.height + "px",
+    });
+  }
+
+  // 그린(또는 자석으로 만든) box 를 주석으로 추가하고 즉시 캡처한다. 드래그·영상클릭 양쪽에서 재사용.
+  // boxEl: 비영상 캡처 때 페이지에 남길 빨강 박스(영상은 캡처 후 제거).
+  function commitRectCapture(box, boxEl) {
+    const id = uid();
+    const vid = videoUnder(box); // 영상 위면 시간축 캡처로 전환
+    const ann = { type: "rect", id, rect: box, image: null };
+    if (vid) {
+      // 영상 캡처: 타임스탬프 기록, page-Y 대신 영상 문서-Y로 묶고 시간순 정렬. 박스는 안 남김.
+      ann.videoTime = vid.v.currentTime || 0;
+      ann.videoIdx = vid.idx;
+      // 같은 영상의 캡처는 첫 캡처의 Y를 재사용 → 스크롤·미니플레이어로 위치가 변해도 한 묶음 유지.
+      const prior = annotations.find(
+        (a) => a.type === "rect" && a.videoIdx === vid.idx && a.videoTop != null
+      );
+      ann.videoTop = prior ? prior.videoTop : vid.v.getBoundingClientRect().top + window.scrollY;
+    } else {
+      boxEl.dataset.caId = id; // 기사·논문: 박스를 페이지에 유지(형광펜 삭제 연동용)
+    }
+    annotations.push(ann);
+    refreshAnnotationsPanel(); // 네모 추가 즉시 반영(이미지는 캡처 후 한 번 더)
+    revealOnFirstAnnotation();
+    scrollPanelTo(id); // 방금 추가한 항목으로 패널 스크롤(확인 + 바로 캡션 입력)
+    // 그린 영역을 즉시(조용히) 캡처해 주석에 저장 (저장 버튼/AI에서 재사용)
+    captureRegion(box)
+      .then((dataUrl) => {
+        ann.image = dataUrl;
+        if (vid) boxEl.remove(); // 영상: 캡처 끝나면 박스 제거(시청 방해·다음 캡처 혼동 방지)
+        refreshAnnotationsPanel();
+        scrollPanelTo(id); // 이미지·캡션칸이 생긴 뒤 다시 스크롤(캡션이 보이도록)
+      })
+      .catch((err) => {
+        if (vid) boxEl.remove();
+        console.warn("[주석] 캡처 실패:", err);
+      });
   }
 
   // 뷰포트 좌표 (cx,cy) 가 어떤 <video> 위에 있으면 그 영상과 인덱스를 돌려준다(없으면 null).
@@ -1706,7 +1751,128 @@
       hlCount,
       rectCount,
     };
-    showNotionPicker(base, summary, notion_parent_id);
+    showNotionDbStep(base, summary, notion_parent_id);
+  }
+
+  // 내보내기 1단계 — 어떤 인박스 DB 로 보낼지 고른다(평소엔 활성 DB가 미리 선택돼 그냥 통과).
+  // 새 DB 만들기도 여기서. 목록 조회 실패 시 기존 자동 경로(분류 단계)로 폴백.
+  function showNotionDbStep(base, summary, parentId) {
+    showPanel("Notion 내보내기", "DB 목록 불러오는 중…", false);
+    chrome.runtime.sendMessage({ type: "notion-list-dbs", parentId }, (resp) => {
+      if (chrome.runtime.lastError || !resp || !resp.ok) {
+        const err = chrome.runtime.lastError
+          ? chrome.runtime.lastError.message
+          : (resp && resp.error) || "알 수 없음";
+        console.warn("[주석] DB 목록 실패:", err);
+        return showNotionPicker(base, summary, parentId); // 폴백: 활성/자동 DB로 분류 단계 진행
+      }
+      renderNotionDbStep(base, summary, parentId, resp.databases || [], resp.activeId);
+    });
+  }
+
+  function renderNotionDbStep(base, summary, parentId, databases, activeId) {
+    panelBody.style.whiteSpace = "normal";
+    panelBody.textContent = "";
+    let chosen = activeId || (databases[0] && databases[0].id) || null;
+
+    const label = document.createElement("div");
+    label.textContent = "내보낼 DB 선택";
+    label.style.cssText =
+      "font-weight:600 !important;margin:2px 0 8px !important;color:#333 !important";
+    panelBody.appendChild(label);
+
+    const wrap = document.createElement("div");
+    wrap.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px";
+    const btns = [];
+    const paint = () => btns.forEach((b) => (b.style.cssText = chipCss(b.dataset.id === chosen)));
+    databases.forEach((d) => {
+      const b = document.createElement("button");
+      const when = d.created ? new Date(d.created).toLocaleDateString() : "";
+      b.textContent = d.title + (when ? " (" + when + ")" : "");
+      b.dataset.id = d.id;
+      b.addEventListener("click", () => {
+        chosen = d.id;
+        paint();
+      });
+      btns.push(b);
+      wrap.appendChild(b);
+    });
+    panelBody.appendChild(wrap);
+
+    if (!databases.length) {
+      const empty = document.createElement("div");
+      empty.textContent = "아직 인박스 DB가 없습니다. 아래에서 새로 만들어 주세요.";
+      empty.style.cssText = "color:#666;font-size:12px;margin-bottom:8px";
+      panelBody.appendChild(empty);
+    }
+
+    // 새 DB 만들기 (선택적 라벨 — 같은 페이지의 다른 DB와 구분)
+    const newRow = document.createElement("div");
+    newRow.style.cssText = "display:flex;gap:6px;margin-bottom:12px";
+    const labelInput = document.createElement("input");
+    labelInput.type = "text";
+    labelInput.placeholder = "새 DB 라벨(선택) 예: 맥북";
+    labelInput.style.cssText =
+      "flex:1 !important;box-sizing:border-box !important;padding:6px !important;border:1px solid #ccc !important;" +
+      "border-radius:6px !important;background:#fff !important;color:#333 !important;font-size:13px !important;" +
+      "outline:none !important;box-shadow:none !important";
+    const newBtn = document.createElement("button");
+    newBtn.textContent = "+ 새 DB";
+    newBtn.style.cssText = chipCss(false);
+    newBtn.addEventListener("click", () => {
+      newBtn.disabled = true;
+      newBtn.textContent = "생성 중…";
+      chrome.runtime.sendMessage(
+        { type: "notion-create-db", parentId, label: labelInput.value.trim() },
+        (resp) => {
+          if (chrome.runtime.lastError || !resp || !resp.ok) {
+            newBtn.disabled = false;
+            newBtn.textContent = "+ 새 DB";
+            return alert(
+              "새 DB 생성 실패: " +
+                (chrome.runtime.lastError
+                  ? chrome.runtime.lastError.message
+                  : (resp && resp.error) || "알 수 없음")
+            );
+          }
+          showNotionPicker(base, summary, parentId); // 생성 즉시 활성 지정됨 → 분류 단계로
+        }
+      );
+    });
+    newRow.appendChild(labelInput);
+    newRow.appendChild(newBtn);
+    panelBody.appendChild(newRow);
+
+    const next = document.createElement("button");
+    next.textContent = "다음 (분류 선택) →";
+    next.style.cssText =
+      "padding:7px 14px !important;background:#1a5fb4 !important;color:#fff !important;border:none !important;" +
+      "border-radius:6px !important;font-weight:600 !important;cursor:pointer !important;font-size:13px !important;" +
+      "outline:none !important;box-shadow:none !important";
+    next.addEventListener("click", () => {
+      if (!chosen) return alert("DB를 선택하거나 새로 만들어 주세요.");
+      next.disabled = true;
+      next.textContent = "확인 중…";
+      chrome.runtime.sendMessage(
+        { type: "notion-set-active-db", parentId, databaseId: chosen },
+        (resp) => {
+          if (chrome.runtime.lastError || !resp || !resp.ok) {
+            next.disabled = false;
+            next.textContent = "다음 (분류 선택) →";
+            return alert(
+              "DB 선택 실패: " +
+                (chrome.runtime.lastError
+                  ? chrome.runtime.lastError.message
+                  : (resp && resp.error) || "알 수 없음")
+            );
+          }
+          showNotionPicker(base, summary, parentId);
+        }
+      );
+    });
+    panelBody.appendChild(next);
+
+    paint();
   }
 
   // 내보내기 직전 패널 — Notion DB의 '분류' select 옵션을 실시간 조회해 버튼으로 보여준다.
