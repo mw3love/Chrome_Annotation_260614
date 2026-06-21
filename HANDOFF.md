@@ -2,11 +2,34 @@
 
 > 다른 PC에서 이어서 작업할 때 전후사정을 파악하기 위한 메모. (Claude는 세션 간 대화를 기억하지 못하므로 이 파일로 맥락을 넘긴다.)
 
-## 최종 업데이트: 2026-06-21 (0.11.0 Notion 스키마 영어화 + 다중분류 + Status/Grade + 적응형 쓰기 — 아래 ★ 먼저 읽을 것)
+## 최종 업데이트: 2026-06-21 (0.12.0 Notion DB 한글화 + 타입 시그니처 발견(이름 자유) + Status 타입 — 아래 ★ 먼저 읽을 것)
 
 ## ★ 진행 중 / 다음 작업 (새 세션은 여기부터)
 
-### (NEW) 0.11.0 — Notion 스키마 영어화 + 다중분류 + Status/Grade + 적응형 쓰기 (`worker.js`·`content.js`·`manifest.json`)
+### (NEW) 0.12.0 — Notion DB 한글화 + 타입 시그니처 발견(이름 자유) + Status 타입 (`worker.js`·`manifest.json`)
+
+> 0.11.0의 영어 컬럼·Status(select)를 사용자 피드백으로 재정비. 핵심: **DB 발견을 '제목+다중선택 타입'으로** 바꿔 DB 이름 자유화(Part A 완료) + 상태는 노션 진짜 **Status 타입** 사용. (이번 배치는 `worker.js`만.)
+
+**A) Part A 완료 — 타입 시그니처 발견 (`worker.js` `notionSearchInboxDataSources`)**
+- 제목 접두(`Reading Highlighter 인박스`) 강제 제거 → **`POST /search` query 생략(전체 data_source 열거) + '제목(title) 타입 + 다중선택(multi_select) 타입' 보유**로 후보 판별. 검색 결과에 properties 스키마 포함됨(공식 문서 WebFetch 확인 2026-06-21). → **DB 이름 완전 자유.**
+- 타입 기반이라 사용자 모델("제목+다중선택만 맞으면 발견")이 그대로 성립. 시그니처로 먼저 거른 뒤 조상 페이지 한정(비용 큰 조상조회 축소). `NOTION_INBOX_TITLE`은 이제 새 DB 기본 이름일 뿐(발견에 무관).
+
+**B) 컬럼 한글화 + 적응형=타입 우선 (`worker.js`)**
+- 0.11.0 영어 컬럼을 한글로 되돌림(노션 기본 언어): `제목·분류·등급·네모·하이라이트·요약포함·URL·저장일`. 패널 UI는 그대로 한글.
+- 적응형 쓰기: **제목·분류는 '타입'으로 매칭**(이름 무관 — 제목=title, 분류=다중선택 1개), 나머지 메타는 이름+타입. → 컬럼 이름이 뭐든 제목·분류는 저장됨. 분류 후보 조회(`notionGetCategories`)도 다중선택 타입을 이름 무관하게 읽음.
+
+**C) 상태 = Notion 'Status(상태)' 타입 (`worker.js` `notionCreateInboxDatabase`)**
+- 이유: Select를 '상태'라 부르니 Notion 고유 'Status 타입'과 헷갈리고, 매번 Select 이름을 '상태'로 맞춰야 했음(특히 노션에서 직접 만든 DB). → 진짜 Status 타입.
+- 확장은 status **값을 안 씀** — Status 타입은 새 행에 자동 기본값을 채워 빈칸/정렬 문제가 없음(이게 원래 'In Progress 자동'의 목적이었음). status는 적응형 `want`에서 제거됨.
+- 자동 생성 DB엔 **DB 생성 후 best-effort PATCH**로 status 추가(`상태:{status:{}}`). status 생성이 API 버전 의존적이라 **생성과 분리**(실패해도 DB 안 깨지고 `console.warn`만). 기본 옵션은 영문(Not started/In progress/Done) → 사용자가 노션에서 한글 rename + `삭제` 추가.
+- 검증: 새 DB 한글 컬럼·이름 바꾼 DB 발견·다중선택 이름 무관·status 자동 추가/자동 기본값 = **사용자 실조건 확인(2026-06-21, "잘됨")**.
+
+**한계/메모**
+- status 옵션은 그룹과 묶여 API로 커스텀 한글 옵션을 깔끔히 못 넣음(공식 문서도 그룹 구성은 UI 권장) → 옵션명은 UI에서 rename. (자동 한글화 best-effort 2차 PATCH는 가성비 낮아 보류.)
+- 다중선택이 2개 이상인 DB면 분류는 **첫 번째** 다중선택에 들어감.
+- Grade(등급, select A/B/C)는 자동값 없음(수동) — 자동 생성 스키마엔 있음.
+
+### 0.11.0 — Notion 스키마 영어화 + 다중분류 + Status/Grade + 적응형 쓰기 (`worker.js`·`content.js`·`manifest.json`)
 
 > 노션 DB를 수동 관리(아카이브/삭제·등급)하기 좋게 스키마를 정비 + 웹스토어 배포 대비 컬럼명 영어화. 핵심은 **적응형 쓰기** — 어떤 DB든 400 없이 저장.
 
@@ -22,7 +45,7 @@
 **C) 적응형 쓰기 — 400 원천 차단 (`worker.js` `notionRowProps`/`notionCreateRow`)**
 - 행 생성 직전 대상 DB 스키마(`GET /data_sources/{id}`)를 읽어 **실재하는 속성에만** 기록. 제목은 title 타입 속성을 **이름 무관 탐색**(Title/Name/이름…)해 그 키로 씀. 없는 컬럼·타입 불일치는 건너뜀 → 빈약한 DB(title+Tags만)에도 무에러 저장(본문 블록은 스키마 무관하게 항상 저장). → **사용자 실조건 확인(풀스키마·빈약 DB 둘 다).**
 
-**⏭ 다음 작업 — Part A: DB 이름 자유화 (미착수)**
+**⏭ Part A: DB 이름 자유화 (→ 0.12.0에서 완료, 위 0.12.0 섹션 참조)**
 - 현재 DB 발견은 제목이 `Reading Highlighter 인박스`로 시작해야만 패널 목록에 뜸(`notionSearchInboxDataSources`, `worker.js`). 사용자는 DB 이름을 자유롭게 짓고 싶어함(접두 강제가 불만).
 - 합의된 방향: 제목 접두 대신 **"title + Tags(multi_select) 시그니처"**로 후보 DB를 판별(이름 무관). 적응형 쓰기가 이미 있어 어떤 DB를 골라도 400은 안 남.
 - 착수 전 확인 필요: Notion 검색 API가 **페이지 밑 DB를 제목 쿼리 없이 열거 가능한지**, **검색 결과에 스키마(properties)가 포함되는지**(아니면 DB당 `GET /data_sources/{id}` 1회). 부하는 "부모 페이지 밑 + 목록 열 때만"이라 제한적.

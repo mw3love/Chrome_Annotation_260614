@@ -129,7 +129,7 @@ const notionRich = (text) => [{ type: "text", text: { content: String(text).slic
 
 // 수집한 주석·요약 + 업로드된 이미지 id 로 Notion 블록 배열 구성
 // 순서: 주석을 문서 위→아래 위치순으로 인용·이미지를 섞어 배치(주석정리 패널과 동일) → AI 요약.
-// URL·네모 개수는 DB 속성(URL·Boxes)에 있으므로 본문에는 북마크·콜아웃을 넣지 않는다.
+// URL·네모 개수는 DB 속성(URL·네모)에 있으므로 본문에는 북마크·콜아웃을 넣지 않는다.
 function notionExportBlocks(spec, imageIds) {
   const blocks = [];
   let imgIdx = 0;
@@ -159,23 +159,24 @@ function notionExportBlocks(spec, imageIds) {
   return blocks;
 }
 
-// 인박스 DB 스키마 — 'Title' 이 title 속성. 행 생성 시 키가 이와 정확히 일치해야 함.
+// 인박스 DB 스키마 — '제목' 이 title 속성. 컬럼명은 한글(노션 기본 언어). 등급(A/B/C)은 영문 유지.
+// 상태(Status 타입)는 여기 없이, DB 생성 후 best-effort PATCH 로 따로 추가한다(notionCreateInboxDatabase) —
+// status 생성이 API 버전 의존적이라 실패해도 DB 가 안 깨지게 분리. 확장은 status 값은 안 씀(Notion 자동 기본값). 발견은 분류(다중선택)로.
 function notionDbSchema() {
   return {
-    Status: { select: { options: [{ name: "Delete" }, { name: "In Progress" }, { name: "Archive" }] } },
-    Title: { title: {} },
-    Tags: { multi_select: { options: [{ name: "미분류" }] } },
-    Grade: { select: { options: [{ name: "A" }, { name: "B" }, { name: "C" }] } },
-    Boxes: { number: {} },
-    Highlights: { number: {} },
-    "Has Summary": { checkbox: {} },
+    제목: { title: {} },
+    분류: { multi_select: { options: [{ name: "미분류" }] } },
+    등급: { select: { options: [{ name: "A" }, { name: "B" }, { name: "C" }] } },
+    네모: { number: {} },
+    하이라이트: { number: {} },
+    요약포함: { checkbox: {} },
     URL: { url: {} },
-    Saved: { date: {} },
+    저장일: { date: {} },
   };
 }
 
-// 확장이 만드는 인박스 DB 의 제목 — 이 제목으로 부모 페이지 안의 기존 DB 를 찾아
-// 여러 PC(브라우저)가 같은 부모 페이지를 가리키면 같은 DB 에 연결되게 한다(로컬 캐시 비의존).
+// 확장이 새 인박스 DB 를 만들 때 쓰는 기본 제목. DB 발견은 제목이 아니라 '제목+다중선택 타입' 시그니처로 하므로
+// (notionSearchInboxDataSources), 이 제목은 새 DB 의 기본 이름일 뿐 — 사용자가 자유롭게 바꿔도 발견에 영향 없음.
 const NOTION_INBOX_TITLE = "Reading Highlighter 인박스";
 
 // data_source 객체에서 평문 제목을 뽑는다(2026-03-11 API: 최상위 title 배열).
@@ -210,17 +211,22 @@ async function notionAncestorPageId(parent) {
   return null;
 }
 
-// 부모 페이지 안의 인박스 data_source 를 Notion 검색 API 로 찾는다(제목이 인박스 이름으로 시작).
-// /blocks/children(직속 자식)과 달리 열(column)·토글 안에 중첩된 DB 도 찾는다 → 여러 PC·중첩 구조에서
-// 동일 DB 재사용 가능. 반환 id 는 data_source_id(=행 부모로 바로 사용). 검색은 부모 범위 한정이 안 되므로
-// 결과의 조상 페이지가 부모와 같은 것만 남긴다. (라벨 붙은 새 DB 도 접두 일치로 포함 — 예: "… — 맥북")
+// 부모 페이지 밑의 '인박스 후보' data_source 를 찾는다 — 식별 기준은 제목이 아니라 '타입 시그니처'.
+// (제목 접두 강제를 없애 DB 이름을 자유화. 표식 = '제목(title) 타입 + 다중선택(multi_select) 타입 보유' — 이름 무관.)
+// query 생략 = 연결에 공유된 전체 data_source 열거(검색 결과에 properties 스키마 포함 — 공식 문서 확인 2026-06-21).
+// /blocks/children(직속 자식)과 달리 열·토글 안 중첩 DB 도 찾음. 반환 id 는 data_source_id(=행 부모로 바로 사용).
+// 시그니처로 먼저 거른 뒤(비용 큰 조상조회 대상 축소) 조상 페이지가 parentKey 인 것만 남긴다(못 풀면 안전 포함).
 async function notionSearchInboxDataSources(parentKey) {
-  const matched = [];
+  const isInbox = (props) => {
+    if (!props) return false;
+    const types = Object.values(props).map((p) => p && p.type);
+    return types.includes("title") && types.includes("multi_select");
+  };
+  const candidates = [];
   let cursor = null;
   do {
     const body = {
-      query: NOTION_INBOX_TITLE,
-      filter: { property: "object", value: "data_source" }, // 2026-03-11: database 가 아니라 data_source
+      filter: { property: "object", value: "data_source" }, // query 생략 = 전체 data_source 열거
       page_size: 100,
     };
     if (cursor) body.start_cursor = cursor;
@@ -231,15 +237,24 @@ async function notionSearchInboxDataSources(parentKey) {
     });
     for (const ds of res.results || []) {
       if (ds.object !== "data_source") continue;
-      const title = notionPlainTitle(ds);
-      if (!title.startsWith(NOTION_INBOX_TITLE)) continue;
-      matched.push({ id: ds.id, title, created: ds.created_time || "", parent: ds.parent });
+      let props = ds.properties || null;
+      if (!props) {
+        // 방어: 검색 결과에 스키마가 없으면(이론상 안 그래야 함) data_source 1회 조회로 보완.
+        try {
+          const full = await notionFetch("/data_sources/" + ds.id, { headers: await notionHeaders() });
+          props = full.properties || {};
+        } catch (_) {
+          props = {};
+        }
+      }
+      if (isInbox(props))
+        candidates.push({ id: ds.id, title: notionPlainTitle(ds), created: ds.created_time || "", parent: ds.parent });
     }
     cursor = res.has_more ? res.next_cursor : null;
   } while (cursor);
   // 조상 페이지가 parentKey 인 것만 남긴다(못 풀면 안전하게 포함).
   const scoped = [];
-  for (const d of matched) {
+  for (const d of candidates) {
     let anc = null;
     try {
       anc = await notionAncestorPageId(d.parent);
@@ -265,6 +280,18 @@ async function notionCreateInboxDatabase(parentKey, label) {
   });
   const dsId = db.data_sources && db.data_sources[0] && db.data_sources[0].id;
   if (!dsId) throw new Error("DB 생성 응답에 data_source 가 없습니다.");
+  // 상태(Status) 타입 속성 보강 — best-effort. status 생성은 API 버전 의존적이라, 실패해도 DB 는 유지되게
+  // 생성과 분리해 시도한다(실패 시 사용자가 노션에서 수동 추가). 옵션 미지정 = Notion 기본(시작전/진행중/완료),
+  // '삭제' 등은 사용자가 추가. status 타입은 새 행에 자동 기본값이 차서 빈칸/정렬 문제 없음(값은 우리가 안 씀).
+  try {
+    await notionFetch("/data_sources/" + dsId, {
+      method: "PATCH",
+      headers: await notionHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ properties: { 상태: { status: {} } } }),
+    });
+  } catch (e) {
+    console.warn("[주석] 상태(Status) 속성 자동 추가 실패 — 노션에서 수동 추가 필요:", e && e.message);
+  }
   return { databaseId: db.id, dataSourceId: dsId };
 }
 
@@ -323,45 +350,49 @@ async function notionGetOrCreateDatabase(parentId) {
     return dataSourceId;
   }
   throw new Error(
-    "이 부모 페이지에 '" + NOTION_INBOX_TITLE + "' DB 가 " + found.length +
+    "이 부모 페이지에 인박스 후보 DB 가 " + found.length +
       "개 있습니다. 내보내기 패널에서 사용할 DB 를 선택하세요."
   );
 }
 
-// 분류(Tags, multi_select) 후보 조회 — 데이터소스 스키마의 'Tags' multi_select 옵션 이름 목록.
+// 분류 후보 조회 — 데이터소스의 '다중선택 타입' 속성(이름 무관)의 옵션 이름 목록.
 // 내보내기 직전 패널에서 이 목록을 버튼으로 보여줘 사용자가 그 자리에서 분류를 여러 개 고른다.
 async function notionGetCategories(parentId) {
   const dataSourceId = await notionGetOrCreateDatabase(parentId);
   const ds = await notionFetch("/data_sources/" + dataSourceId, {
     headers: await notionHeaders(),
   });
-  const prop = ds.properties && ds.properties["Tags"];
+  const prop =
+    ds.properties && Object.values(ds.properties).find((p) => p && p.type === "multi_select");
   const opts = (prop && prop.multi_select && prop.multi_select.options) || [];
   return opts.map((o) => o.name);
 }
 
 // 행 속성 — 대상 DB 에 '실재하는' 속성에만 쓴다(적응형). 없는 컬럼·타입 불일치는 건너뛰어 400 을 원천 차단한다.
-// 분류(multi_select)는 사용자가 고른 값들의 배열(빈 배열이면 분류 없음). 기존에 없는 옵션 이름은 Notion 이 자동 생성한다.
-// 본문(하이라이트·요약·이미지)은 children 블록이라 스키마와 무관하게 항상 저장됨 — 여기선 메타데이터 속성만 다룬다.
+// 제목·분류는 '타입'으로 매칭(이름 무관) — 제목=title 타입, 분류=다중선택 타입 1개. 둘만 있으면 발견·저장 가능.
+// 나머지 메타(하이라이트·네모·요약포함·저장일·URL)는 '이름+타입'으로 매칭(숫자·select 가 여럿이면 타입만으론 구분 불가).
+// 상태는 Notion 'Status' 타입에 맡긴다 — 확장이 안 씀(새 행에 Notion 이 자동 기본값을 채워 빈칸/정렬 문제 없음).
+// 본문(하이라이트 내용·요약·이미지)은 children 블록이라 스키마와 무관하게 항상 저장됨.
 function notionRowProps(spec, schemaProps) {
   schemaProps = schemaProps || {};
   const cats = (Array.isArray(spec.category) ? spec.category : [])
     .map((c) => (c || "").trim())
     .filter(Boolean);
   const out = {};
+  const propByType = (t) => Object.keys(schemaProps).find((n) => schemaProps[n] && schemaProps[n].type === t);
 
-  // 제목: title 타입 속성은 이름이 DB마다 다를 수 있어(Title/Name/이름…) 스키마에서 실제 이름을 찾아 그 키로 쓴다.
-  const titleName = Object.keys(schemaProps).find((n) => schemaProps[n] && schemaProps[n].type === "title");
+  // 제목(title 타입)·분류(다중선택 타입)는 이름이 DB마다 달라도 타입으로 찾아 그 키로 쓴다.
+  const titleName = propByType("title");
   if (titleName) out[titleName] = { title: notionRich(spec.title || "Untitled") };
+  const tagsName = propByType("multi_select");
+  if (tagsName) out[tagsName] = { multi_select: cats.map((name) => ({ name })) };
 
-  // 나머지: '이름 + 타입'이 대상 스키마와 일치할 때만 포함한다.
+  // 메타: '이름 + 타입'이 대상 스키마와 일치할 때만 포함한다. (등급은 사용자가 수동 기입 → 여기서 안 씀)
   const want = {
-    Saved: { type: "date", value: { date: { start: new Date().toISOString() } } },
-    Tags: { type: "multi_select", value: { multi_select: cats.map((name) => ({ name })) } },
-    Status: { type: "select", value: { select: { name: "In Progress" } } },
-    Highlights: { type: "number", value: { number: spec.hlCount || 0 } },
-    Boxes: { type: "number", value: { number: spec.rectCount || 0 } },
-    "Has Summary": { type: "checkbox", value: { checkbox: !!(spec.summary && spec.summary.length) } },
+    하이라이트: { type: "number", value: { number: spec.hlCount || 0 } },
+    네모: { type: "number", value: { number: spec.rectCount || 0 } },
+    요약포함: { type: "checkbox", value: { checkbox: !!(spec.summary && spec.summary.length) } },
+    저장일: { type: "date", value: { date: { start: new Date().toISOString() } } },
     URL: { type: "url", value: { url: spec.url || "" } },
   };
   for (const [name, w] of Object.entries(want)) {
