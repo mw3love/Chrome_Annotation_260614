@@ -129,7 +129,7 @@ const notionRich = (text) => [{ type: "text", text: { content: String(text).slic
 
 // 수집한 주석·요약 + 업로드된 이미지 id 로 Notion 블록 배열 구성
 // 순서: 주석을 문서 위→아래 위치순으로 인용·이미지를 섞어 배치(주석정리 패널과 동일) → AI 요약.
-// URL·네모 개수는 DB 속성(URL·네모)에 있으므로 본문에는 북마크·콜아웃을 넣지 않는다.
+// URL·네모 개수는 DB 속성(URL·Boxes)에 있으므로 본문에는 북마크·콜아웃을 넣지 않는다.
 function notionExportBlocks(spec, imageIds) {
   const blocks = [];
   let imgIdx = 0;
@@ -159,16 +159,18 @@ function notionExportBlocks(spec, imageIds) {
   return blocks;
 }
 
-// 인박스 DB 스키마 — '제목' 이 title 속성. 행 생성 시 키가 이와 정확히 일치해야 함.
+// 인박스 DB 스키마 — 'Title' 이 title 속성. 행 생성 시 키가 이와 정확히 일치해야 함.
 function notionDbSchema() {
   return {
-    제목: { title: {} },
+    Status: { select: { options: [{ name: "Delete" }, { name: "In Progress" }, { name: "Archive" }] } },
+    Title: { title: {} },
+    Tags: { multi_select: { options: [{ name: "미분류" }] } },
+    Grade: { select: { options: [{ name: "A" }, { name: "B" }, { name: "C" }] } },
+    Boxes: { number: {} },
+    Highlights: { number: {} },
+    "Has Summary": { checkbox: {} },
     URL: { url: {} },
-    저장일: { date: {} },
-    분류: { select: { options: [{ name: "미분류" }] } },
-    하이라이트: { number: {} },
-    네모: { number: {} },
-    요약포함: { checkbox: {} },
+    Saved: { date: {} },
   };
 }
 
@@ -326,41 +328,62 @@ async function notionGetOrCreateDatabase(parentId) {
   );
 }
 
-// 분류(select) 후보 조회 — 데이터소스 스키마의 '분류' select 옵션 이름 목록.
-// 내보내기 직전 패널에서 이 목록을 버튼으로 보여줘 사용자가 그 자리에서 분류를 고른다.
+// 분류(Tags, multi_select) 후보 조회 — 데이터소스 스키마의 'Tags' multi_select 옵션 이름 목록.
+// 내보내기 직전 패널에서 이 목록을 버튼으로 보여줘 사용자가 그 자리에서 분류를 여러 개 고른다.
 async function notionGetCategories(parentId) {
   const dataSourceId = await notionGetOrCreateDatabase(parentId);
   const ds = await notionFetch("/data_sources/" + dataSourceId, {
     headers: await notionHeaders(),
   });
-  const prop = ds.properties && ds.properties["분류"];
-  const opts = (prop && prop.select && prop.select.options) || [];
+  const prop = ds.properties && ds.properties["Tags"];
+  const opts = (prop && prop.multi_select && prop.multi_select.options) || [];
   return opts.map((o) => o.name);
 }
 
-// 행 속성 — notionDbSchema 의 키와 정확히 일치해야 함.
-// 분류는 내보내기 시 사용자가 고른 값(없으면 미분류). 기존에 없는 이름이면 Notion 이 옵션을 자동 생성한다.
-function notionRowProps(spec) {
-  const props = {
-    제목: { title: notionRich(spec.title || "Untitled") },
-    저장일: { date: { start: new Date().toISOString() } },
-    분류: { select: { name: (spec.category && spec.category.trim()) || "미분류" } },
-    하이라이트: { number: spec.hlCount || 0 },
-    네모: { number: spec.rectCount || 0 },
-    요약포함: { checkbox: !!(spec.summary && spec.summary.length) },
+// 행 속성 — 대상 DB 에 '실재하는' 속성에만 쓴다(적응형). 없는 컬럼·타입 불일치는 건너뛰어 400 을 원천 차단한다.
+// 분류(multi_select)는 사용자가 고른 값들의 배열(빈 배열이면 분류 없음). 기존에 없는 옵션 이름은 Notion 이 자동 생성한다.
+// 본문(하이라이트·요약·이미지)은 children 블록이라 스키마와 무관하게 항상 저장됨 — 여기선 메타데이터 속성만 다룬다.
+function notionRowProps(spec, schemaProps) {
+  schemaProps = schemaProps || {};
+  const cats = (Array.isArray(spec.category) ? spec.category : [])
+    .map((c) => (c || "").trim())
+    .filter(Boolean);
+  const out = {};
+
+  // 제목: title 타입 속성은 이름이 DB마다 다를 수 있어(Title/Name/이름…) 스키마에서 실제 이름을 찾아 그 키로 쓴다.
+  const titleName = Object.keys(schemaProps).find((n) => schemaProps[n] && schemaProps[n].type === "title");
+  if (titleName) out[titleName] = { title: notionRich(spec.title || "Untitled") };
+
+  // 나머지: '이름 + 타입'이 대상 스키마와 일치할 때만 포함한다.
+  const want = {
+    Saved: { type: "date", value: { date: { start: new Date().toISOString() } } },
+    Tags: { type: "multi_select", value: { multi_select: cats.map((name) => ({ name })) } },
+    Status: { type: "select", value: { select: { name: "In Progress" } } },
+    Highlights: { type: "number", value: { number: spec.hlCount || 0 } },
+    Boxes: { type: "number", value: { number: spec.rectCount || 0 } },
+    "Has Summary": { type: "checkbox", value: { checkbox: !!(spec.summary && spec.summary.length) } },
+    URL: { type: "url", value: { url: spec.url || "" } },
   };
-  if (spec.url) props.URL = { url: spec.url };
-  return props;
+  for (const [name, w] of Object.entries(want)) {
+    if (name === "URL" && !spec.url) continue; // URL 값이 없으면 생략
+    const sp = schemaProps[name];
+    if (sp && sp.type === w.type) out[name] = w.value;
+  }
+  return out;
 }
 
 // DB 행(=페이지) 생성 — children 은 요청당 100개 제한이라 초과분은 PATCH append
 async function notionCreateRow(dataSourceId, spec, blocks) {
+  // 적응형 쓰기: 대상 DB 스키마를 먼저 읽어, 실재하는 속성에만 쓰게 한다(없는 컬럼에 쓰면 400).
+  const ds = await notionFetch("/data_sources/" + dataSourceId, {
+    headers: await notionHeaders(),
+  });
   const page = await notionFetch("/pages", {
     method: "POST",
     headers: await notionHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({
       parent: { type: "data_source_id", data_source_id: dataSourceId },
-      properties: notionRowProps(spec),
+      properties: notionRowProps(spec, ds.properties || {}),
       children: blocks.slice(0, 100),
     }),
   });

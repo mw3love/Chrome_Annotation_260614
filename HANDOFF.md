@@ -2,11 +2,32 @@
 
 > 다른 PC에서 이어서 작업할 때 전후사정을 파악하기 위한 메모. (Claude는 세션 간 대화를 기억하지 못하므로 이 파일로 맥락을 넘긴다.)
 
-## 최종 업데이트: 2026-06-21 (0.10.0 영상 캡처 피드백 + 크로스플랫폼 단축키 + Notion 1-DB 스킵 + 미니패널 고아 수정 — 아래 ★ 먼저 읽을 것)
+## 최종 업데이트: 2026-06-21 (0.11.0 Notion 스키마 영어화 + 다중분류 + Status/Grade + 적응형 쓰기 — 아래 ★ 먼저 읽을 것)
 
 ## ★ 진행 중 / 다음 작업 (새 세션은 여기부터)
 
-### (NEW) 0.10.0 — 캡처 피드백 + 크로스플랫폼 단축키 + Notion 1-DB 스킵 + 미니패널 고아 수정 (`content.js`·`content.css`·`manifest.json`)
+### (NEW) 0.11.0 — Notion 스키마 영어화 + 다중분류 + Status/Grade + 적응형 쓰기 (`worker.js`·`content.js`·`manifest.json`)
+
+> 노션 DB를 수동 관리(아카이브/삭제·등급)하기 좋게 스키마를 정비 + 웹스토어 배포 대비 컬럼명 영어화. 핵심은 **적응형 쓰기** — 어떤 DB든 400 없이 저장.
+
+**A) 분류 → Tags (multi_select) (`worker.js`·`content.js`)**
+- 단일 select였던 분류를 **다중선택**으로(한 항목에 여러 분류). 패널 칩 **토글식**(여러 개 켜고 끄기), 라벨 "분류 선택 (여러 개 선택 가능)".
+- **직접입력 Enter로 새 칩 추가**: 전역 `swallowTypingKeys`(window 캡처 단계)가 우리 입력칸 keydown을 `stopImmediatePropagation`으로 먼저 삼켜 입력칸 자체 핸들러가 안 먹던 문제 → 노트 입력칸과 똑같이 그 함수 *안에서* 처리하도록 모듈 변수 `catComposer`/`catComposerSubmit` 등록(IME 한글은 `isComposing`으로 Enter 2회). → **사용자 실조건 확인.**
+
+**B) 컬럼 전체 영어화 + Status + Grade (`worker.js`)**
+- 스키마: `Status·Title·Tags·Grade·Boxes·Highlights·Has Summary·URL·Saved`(영어 통일). 패널 UI 텍스트는 한글 유지(컬럼명과 별개).
+- **Status(select)**: 내보낼 때 자동 `In Progress`, 사용자가 Notion에서 `Delete`/`Archive`로 바꿔 수동 관리(빈칸이 정렬 맨 아래로 가던 문제 회피). ⚠ Notion **Select 타입**이어야 함 — 고유 'Status 타입'이면 적응형이 건너뜀(자동값 안 박힘).
+- **Grade(select A/B/C)**: 복기하며 내용 질 메모용, 자동값 없음.
+
+**C) 적응형 쓰기 — 400 원천 차단 (`worker.js` `notionRowProps`/`notionCreateRow`)**
+- 행 생성 직전 대상 DB 스키마(`GET /data_sources/{id}`)를 읽어 **실재하는 속성에만** 기록. 제목은 title 타입 속성을 **이름 무관 탐색**(Title/Name/이름…)해 그 키로 씀. 없는 컬럼·타입 불일치는 건너뜀 → 빈약한 DB(title+Tags만)에도 무에러 저장(본문 블록은 스키마 무관하게 항상 저장). → **사용자 실조건 확인(풀스키마·빈약 DB 둘 다).**
+
+**⏭ 다음 작업 — Part A: DB 이름 자유화 (미착수)**
+- 현재 DB 발견은 제목이 `Reading Highlighter 인박스`로 시작해야만 패널 목록에 뜸(`notionSearchInboxDataSources`, `worker.js`). 사용자는 DB 이름을 자유롭게 짓고 싶어함(접두 강제가 불만).
+- 합의된 방향: 제목 접두 대신 **"title + Tags(multi_select) 시그니처"**로 후보 DB를 판별(이름 무관). 적응형 쓰기가 이미 있어 어떤 DB를 골라도 400은 안 남.
+- 착수 전 확인 필요: Notion 검색 API가 **페이지 밑 DB를 제목 쿼리 없이 열거 가능한지**, **검색 결과에 스키마(properties)가 포함되는지**(아니면 DB당 `GET /data_sources/{id}` 1회). 부하는 "부모 페이지 밑 + 목록 열 때만"이라 제한적.
+
+### 0.10.0 — 캡처 피드백 + 크로스플랫폼 단축키 + Notion 1-DB 스킵 + 미니패널 고아 수정 (`content.js`·`content.css`·`manifest.json`)
 
 **A) 영상 네모 미니패널 고아 수정 (`content.js`)**
 - 증상: 영상 위에 네모를 그리면 hover 미니툴바(`[🤖][🖼][✕]`)만 남고 앵커(박스)는 사라져 떠 있던 문제.

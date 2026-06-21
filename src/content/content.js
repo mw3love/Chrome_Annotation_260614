@@ -841,6 +841,11 @@
   document.addEventListener("pointermove", swallowPointer, true);
   document.addEventListener("pointerup", swallowPointer, true);
 
+  // Notion '새 분류' 입력칸 참조 + Enter 제출 콜백 — renderNotionPicker 가 채운다.
+  // (아래 swallowTypingKeys 가 입력칸 keydown 을 삼키므로 Enter 는 거기서 이 콜백으로 처리한다.)
+  let catComposer = null;
+  let catComposerSubmit = null;
+
   // 노트·캡션 등 우리 UI 입력칸에서 타이핑할 때 키 이벤트가 페이지로 새어 사이트 단축키
   // (예: 유튜브 스페이스=재생/정지)를 건드리지 않게 캡처 단계에서 차단. preventDefault 는 안 해
   // 글자 입력 자체는 정상.
@@ -860,6 +865,17 @@
       const text = noteComposer.innerText.trim();
       if (text) addNoteAtEnd(text);
       noteComposer.textContent = "";
+    }
+    // Notion 내보내기 패널 '새 분류' 입력칸 Enter — 이 차단 함수가 입력칸 핸들러보다 먼저 돌아
+    // 입력칸 자체 keydown 을 삼키므로, 노트와 마찬가지로 여기서 직접 추가 처리한다.
+    if (
+      el === catComposer &&
+      e.type === "keydown" &&
+      e.key === "Enter" &&
+      !e.isComposing // 한글 조합 확정용 Enter 는 추가하지 않음(한 번 더 누르면 추가)
+    ) {
+      e.preventDefault();
+      if (catComposerSubmit) catComposerSubmit();
     }
     // Alt/Ctrl/Meta 조합은 우리 단축키(Alt+숫자 등) — 페이지로 가도 무해하고 우리 핸들러에 닿아야 하므로 통과.
     if (e.altKey || e.ctrlKey || e.metaKey) return;
@@ -2193,7 +2209,7 @@
   function renderNotionPicker(base, summary, cats, warn, parentId) {
     panelBody.style.whiteSpace = "normal";
     panelBody.textContent = "";
-    let chosen = cats[0] || "미분류";
+    const chosen = new Set(); // 다중 선택 — 빈 집합이면 분류 없이 저장
 
     // DB 가 1개라 선택 단계를 건너뛴 경우에도 다른 DB 선택·새 DB 생성으로 돌아갈 수 있는 작은 링크.
     // 보조 동작이라 조용한 텍스트 링크로 두되, hover 밑줄로 클릭 가능함을 알리고 아래 구분선으로 본문과 분리.
@@ -2223,7 +2239,7 @@
     panelBody.appendChild(backDiv);
 
     const label = document.createElement("div");
-    label.textContent = "분류 선택";
+    label.textContent = "분류 선택 (여러 개 선택 가능)";
     label.style.cssText = "font-weight:600 !important;margin:2px 0 8px !important;color:#333 !important";
     panelBody.appendChild(label);
 
@@ -2231,32 +2247,41 @@
     wrap.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px";
     const btns = [];
     const paint = () =>
-      btns.forEach((b) => (b.style.cssText = chipCss(b.dataset.cat === chosen)));
-    cats.forEach((name) => {
+      btns.forEach((b) => (b.style.cssText = chipCss(chosen.has(b.dataset.cat))));
+    const addChip = (name) => {
+      if (btns.some((b) => b.dataset.cat === name)) return; // 중복 칩 방지
       const b = document.createElement("button");
       b.textContent = name;
       b.dataset.cat = name;
       b.addEventListener("click", () => {
-        chosen = name;
-        custom.value = "";
+        if (chosen.has(name)) chosen.delete(name);
+        else chosen.add(name);
         paint();
       });
       btns.push(b);
       wrap.appendChild(b);
-    });
+    };
+    cats.forEach(addChip);
     panelBody.appendChild(wrap);
 
     const custom = document.createElement("input");
     custom.type = "text";
-    custom.placeholder = "새 분류 직접 입력";
+    custom.placeholder = "새 분류 입력 후 Enter";
     custom.style.cssText =
       "width:100% !important;box-sizing:border-box !important;padding:6px !important;margin-bottom:10px !important;" +
       "border:1px solid #ccc !important;border-radius:6px !important;background:#fff !important;color:#333 !important;" +
       "font-size:13px !important;outline:none !important;box-shadow:none !important";
-    custom.addEventListener("input", () => {
-      chosen = custom.value.trim() || cats[0] || "미분류";
+    // 입력칸 Enter 는 전역 swallowTypingKeys(캡처 단계)가 먼저 삼켜 이 요소의 keydown 까지 닿지 않으므로,
+    // 그 핸들러가 호출할 제출 콜백을 등록한다(위 catComposer / catComposerSubmit).
+    catComposer = custom;
+    catComposerSubmit = () => {
+      const name = custom.value.trim();
+      if (!name) return;
+      addChip(name); // 새 칩 생성(이미 있으면 무시)
+      chosen.add(name); // 선택 상태로
+      custom.value = "";
       paint();
-    });
+    };
     panelBody.appendChild(custom);
 
     let includeSummary = true;
@@ -2288,7 +2313,7 @@
       "border-radius:6px !important;font-weight:600 !important;cursor:pointer !important;font-size:13px !important;" +
       "outline:none !important;box-shadow:none !important";
     save.addEventListener("click", () =>
-      sendNotionExport(base, chosen, includeSummary ? summary : null)
+      sendNotionExport(base, Array.from(chosen), includeSummary ? summary : null)
     );
     panelBody.appendChild(save);
 
