@@ -1,4 +1,4 @@
-# Chrome 주석 확장 — 계획
+# Reading Highlighter — 계획
 
 긴 글을 **형광펜 치며 읽는 느낌**을 주는 크롬 확장(Manifest V3).
 
@@ -74,6 +74,16 @@ options.html / options.js               # API 키 입력
 
 - [x] **17. Notion DB 한글화 + 타입 시그니처 발견(이름 자유) + Status 타입 (0.12.0)** — 0.11.0의 영어 컬럼·Status(select)를 사용자 피드백으로 재정비. ① **컬럼 한글화**: `제목·분류·등급·네모·하이라이트·요약포함·URL·저장일`(노션 기본 언어). ② **발견 = 타입 시그니처(Part A 완료)**: `notionSearchInboxDataSources`가 제목 접두 대신 **'제목(title) 타입 + 다중선택(multi_select) 타입' 보유**로 후보 판별(`POST /search` query 생략 = 전체 data_source 열거, 결과에 properties 포함 — 공식 문서 확인). → **DB 이름 완전 자유.** ③ **적응형 쓰기 = 타입 우선**: 제목·분류는 타입으로 매칭(이름 무관), 메타(하이라이트·네모·요약포함·저장일·URL)는 이름+타입. ④ **상태 = Notion 'Status(상태)' 타입**: Select(이름 '상태')가 Notion 고유 Status 타입과 헷갈리고 매번 이름을 맞춰야 하던 문제 → 진짜 Status 타입. 확장은 status **값을 안 씀**(Status 타입은 새 행에 자동 기본값을 채워 빈칸/정렬 문제 없음 — 원래 'In Progress 자동'의 목적). 자동 생성 DB엔 **DB 생성 후 best-effort PATCH**로 status 추가(`상태:{status:{}}`, 실패해도 DB 안 깨짐 — status 생성이 API 버전 의존적이라 분리). 기본 옵션은 영문(Not started/In progress/Done)이라 사용자가 노션에서 한글 rename + `삭제` 추가.
   - 검증: 새 DB 한글 컬럼·이름 바꾼 DB 발견·다중선택 이름 무관 분류 저장·status 자동 추가/자동 기본값 = **사용자 실조건 확인(2026-06-21, "잘됨")**. 한계: status 옵션은 그룹과 묶여 API로 커스텀 한글 옵션 설정이 불안정 → UI에서 rename(공식 문서도 그룹 구성은 UI 권장). 다중선택이 2개 이상이면 분류는 첫 번째에 들어감.
+
+- [x] **18. 주석 정리 탭 빨강 표시 단축키 모드 일치 (0.12.1)** — 빨강 표시 버튼은 주석 정리 탭에서 동작했으나 **Shift+백틱 키만 막혀 있던 불일치** + 키 동작이 버튼과 달랐던 문제 수정. ① **게이트**: 키 핸들러가 `panelIsMd`(AI 요약/qa 탭만 true)만 허용해 주석 정리 탭(`panelIsMd=false`)에서 무시되던 것 → `panelIsMd || panelKind === "annotations"`로 넓혀 **빨강 표시 버튼 가시성(`syncPanelChrome`: 주석정리+요약)과 일치**. ② **모드 토글화**: 키가 "그 순간 선택만 1회 토글"이라 *드래그 먼저 → 키* 만 되고 *키 먼저 → 드래그* 는 안 되고 A버튼 색도 안 바뀌던 문제 → 버튼·키 공용 `toggleMarkMode()`로 묶어 **키도 버튼과 완전 동일**(모드 ON/OFF + A버튼 활성색 + 현재 선택 즉시 적용 → 모드 ON 후 드래그하면 자동 표시). 노트·페이지 입력칸 포커스 중엔 `~`가 글자 입력이라 토글 안 함(`content.js` ~346·359행).
+  - 검증: **사용자 실조건 확인(2026-06-24, "잘된다")** — 주석 정리 탭에서 키 먼저/드래그 먼저 양쪽 + A버튼 색 동기화 동작.
+  - ⚠ **한계(의도된 보류)**: 주석 정리 탭은 `renderAnnotationsBody`가 `panelBody.innerHTML`을 매 변경마다 재생성하므로, 빨강 표시는 **DOM에만 존재 → 다른 주석 추가·삭제 시 소실**되고 **복사·PDF에도 안 들어감**(둘 다 `items` 배열에서 생성, DOM 미참조). 버튼·키 공통 한계. 지속·내보내기는 아래 19번으로 분리(실사용 마찰 보고 결정).
+
+- [ ] **19. (보류) 주석 정리 빨강 표시 지속 + 내보내기 반영** — 18번의 한계 해소. *실사용에서 거슬릴 때만 착수.* 접근은 직접 검증한 두 자매 프로젝트 prior art 기반:
+  - **AI_Dictionary (`src/popup/mark.ts`)** — 마크를 **"렌더 텍스트 offset 범위" 데이터(`MarkRange{start,end}[]`)로 저장** → `applyMarksToDom`로 재렌더 시 다시 입힘 → `domToMarkdown`로 내보내기 반영. **재렌더에도 버티는 핵심 = 데이터 모델.** (이 프로젝트의 `toggleMarkSelection`/`serializeInline`에서 파생·발전)
+  - **youtube_dual_subtitle (`src/content/explain/explain-ui.ts`)** — "DOM이 source of truth" + `surroundContents` + `domToMarkdown`. 데이터 모델 없이 DOM 유지로 버팀(탭 본문을 안 재생성하기에 가능) → **이 프로젝트엔 부적합**(여긴 매번 재생성).
+  - **이 프로젝트 적응 설계**: ① 텍스트 항목(형광펜·**노트 제외 권장** — contenteditable라 offset 드리프트 최악)에 `marks:{start,end}[]` 추가, ② Shift+백틱 시 선택 속한 **항목 id + 항목 내 로컬 offset**으로 토글(전역 offset 금지 — 항목 add/delete로 밀림), ③ `renderAnnotationsBody`에서 항목별 marks 재적용(`applyMarksToDom` 이식), ④ `copyPanel`·`exportPDF`의 `it.text` 직렬화 시 marks를 백틱/빨강으로 주입(DOM 직렬화로 바꾸지 말 것 — 기존 export 위험).
+  - 위험도: ①~③ 낮음(prior art 검증됨), ④ 중간(copy=html+text, PDF=별도 HTML, 이스케이프 잔손).
 
 ## 게이트웨이 메모 (2026-06-13 실측)
 

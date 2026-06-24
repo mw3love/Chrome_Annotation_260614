@@ -342,27 +342,30 @@
   // 도구막대 ⠿ 손잡이 하나로 도구막대+패널을 함께 이동(오른쪽 고정). 패널은 별도 핸들 없음.
   makeDraggable(bar, bar.querySelector(".ca-grip"), true, panel);
 
-  // 빨강 표시 — 토글. 버튼을 켜두면(활성) 패널에서 선택만 해도 표시/해제됨.
-  // 단축키: 패널에 선택이 있을 때 ~(Shift+백틱) 키로도 표시/해제. (백틱은 도구막대 토글로 이동)
+  // 빨강 표시 — 모드 토글. 켜두면(활성·버튼 빨강) 패널에서 선택만 해도(드래그 mouseup) 표시/해제됨.
+  // 단축키 Shift+백틱(~)도 버튼 클릭과 완전히 동일 — 모드 ON 후 드래그하면 자동 표시. (백틱 단독은 도구막대 토글)
   let markMode = false;
   const markBtn = panel.querySelector(".ca-panel-mark");
-  markBtn.addEventListener("mousedown", (e) => e.preventDefault());
-  markBtn.addEventListener("click", () => {
+  // 버튼·단축키 공용 — 모드 토글 + 버튼 활성색 + 현재 선택 즉시 적용.
+  const toggleMarkMode = () => {
     markMode = !markMode;
     markBtn.classList.toggle("active", markMode);
     toggleMarkSelection(); // 선택돼 있으면 즉시 적용
-  });
+  };
+  markBtn.addEventListener("mousedown", (e) => e.preventDefault());
+  markBtn.addEventListener("click", toggleMarkMode);
   panelBody.addEventListener("mouseup", () => {
     if (markMode) setTimeout(toggleMarkSelection, 0); // 선택 확정 후 적용
   });
   document.addEventListener("keydown", (e) => {
     if (extHidden) return; // 확장이 꺼져 있으면 ~ 표시 토글도 무시
-    if (e.key !== "~" || !panelIsMd) return;
-    const sel = window.getSelection();
-    if (sel && !sel.isCollapsed && panelBody.contains(sel.anchorNode)) {
-      e.preventDefault();
-      toggleMarkSelection();
-    }
+    // 닿는 탭: AI 요약(md) + 주석 정리(빨강 표시 버튼 가시성과 일치 — syncPanelChrome).
+    if (e.key !== "~" || !(panelIsMd || panelKind === "annotations")) return;
+    // 입력칸(노트·페이지 폼)에 포커스 중이면 ~ 는 글자 입력 — 모드 토글 안 함.
+    const ae = document.activeElement;
+    if (ae && (ae.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName))) return;
+    e.preventDefault();
+    toggleMarkMode(); // 버튼 클릭과 동일하게 처리(모드 토글 → 드래그 시 자동 표시 + 버튼 색 동기화)
   });
 
   // 빨강 표시 전체 해제
