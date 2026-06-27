@@ -160,6 +160,10 @@
     if (!collapsed) {
       panel.style.width = br.width + "px"; // 가로폭 = 도구막대 폭(패널만 넓어짐)
       panelPos.left = br.left; // 좌측 정렬 → 좌·우변 모두 도구막대와 일치
+    } else {
+      // 접힘: 손잡이가 우상단에 있어 좌변 정렬이면 넓은 패널이 오른쪽으로 삐져나가 짤린다.
+      // 패널 우변을 손잡이 우변에 맞추고 화면 안으로 clamp.
+      panelPos.left = Math.max(8, br.right - panel.offsetWidth);
     }
     panel.style.bottom = "auto";
     panel.style.right = "auto";
