@@ -31,6 +31,8 @@
     '<button data-act="panel" title="주석 정리·AI 요약 패널 (단축키 ' + modLabel("3") + ')">📋 정리·AI</button>' +
     '<span class="ca-sep"></span>' +
     '<button data-act="notion" title="Notion 인박스 DB로 저장 (단축키 ' + modLabel("4") + ')">📝 Notion</button>' +
+    '<span class="ca-sep"></span>' +
+    '<button class="ca-bar-close" data-act="close" title="닫기 — 화면에서 숨김 (백틱 또는 확장 아이콘으로 복귀)">✕</button>' +
     "</span>" +
     '<button class="ca-bar-min" data-act="bar-min" title="도구막대 접기/펼치기 (단축키 `)">▸</button>';
   bar.classList.add("ca-bar-collapsed"); // 기본은 접힌 상태
@@ -668,7 +670,6 @@
   // 첫 주석 작성 시: 접혀 있던 도구막대를 펼치고 '정리' 탭을 열어 방금 정리된 주석을 바로 보여준다.
   // (페이지 로드당 1회만 — 이후엔 사용자가 직접 토글)
   let firstAnnotationRevealed = false;
-  let backtickUsed = false; // 백틱으로 '처음 펼칠 때'만 형광펜까지 켜기 위한 1회용 플래그
   function revealOnFirstAnnotation() {
     if (firstAnnotationRevealed || annotations.length === 0) return;
     firstAnnotationRevealed = true;
@@ -683,6 +684,10 @@
       toggleBar();
       return;
     }
+    if (btn.dataset.act === "close") {
+      setExtHidden(true); // 닫기 = 확장 아이콘 OFF와 동일(전체 숨김). 복귀는 백틱·확장 아이콘
+      return;
+    }
     if (btn.dataset.act === "panel") return togglePanelTab("annotations");
     if (btn.dataset.act === "notion") return exportNotion();
     if (btn.dataset.act === "off") return applyMode(null);
@@ -695,23 +700,27 @@
     if (e.target.closest("button")) e.preventDefault();
   });
 
-  // 단축키: ` 도구막대 접기/펼치기(처음 펼칠 때만 형광펜까지 ON), Esc 모드 해제 / Alt(맥 Option)+1~4 기능.
+  // 단축키: ` 도구막대 접기/펼치기(순수 토글), Esc 모드 해제 / Alt(맥 Option)+1~4 기능.
   // 영상 캡처: 윈도우 F4 / 맥 Option+백틱(맥은 F4를 OS가 가로채 불안정 — 윈도우엔 Alt+백틱 안 묶음).
   // (Alt 를 붙여 YouTube 등 사이트의 단일키 단축키와 안 겹치게 함)
   document.addEventListener("keydown", (e) => {
-    if (extHidden) return; // 확장이 꺼진(미니팝업 OFF) 상태면 단축키(백틱 등) 무시
     if (e.ctrlKey || e.metaKey) return; // 브라우저 조합키와 충돌 방지
     const el = document.activeElement;
     const typing =
       el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+    if (extHidden) {
+      // 닫힌(extHidden) 상태: 백틱(무모디파이어·비타이핑)만 복귀 트리거로 허용, 나머지 단축키는 무시
+      if (!e.altKey && !typing && e.key === "`") {
+        e.preventDefault();
+        setExtHidden(false);
+      }
+      return;
+    }
     if (typing && !e.altKey) return; // 타이핑 중엔 무모디파이어 단축키(백틱·Esc)만 무시, Alt 조합은 허용
     if (!e.altKey) {
       if (e.key === "`") {
         e.preventDefault();
-        const wasCollapsed = bar.classList.contains("ca-bar-collapsed");
-        toggleBar(); // 백틱: 도구막대(+패널) 접기/펼치기
-        if (!backtickUsed && wasCollapsed) activateHighlight(); // 처음 펼칠 때만 형광펜 ON
-        backtickUsed = true;
+        toggleBar(); // 백틱: 도구막대(+패널) 접기/펼치기 (순수 토글 — 형광펜은 따로)
       } else if (e.key === "F4") {
         e.preventDefault();
         const v = pickVideoForShortcut(); // 마우스 밑 영상 → 없으면 화면 최대 영상
@@ -750,12 +759,12 @@
     }
   });
 
-  // 확장 아이콘 클릭 → 확장 UI 전체(툴바+패널+미니툴바) 표시/숨김 토글
+  // 확장 UI 전체(툴바+패널+미니툴바) 표시/숨김 — 확장 아이콘 클릭, 툴바 × 닫기, 백틱 복귀 공용.
   let extHidden = false;
   let panelDisplayBeforeHide = "none";
-  chrome.runtime.onMessage.addListener((msg) => {
-    if (!msg || msg.type !== "toggle-toolbar") return;
-    extHidden = !extHidden;
+  function setExtHidden(hidden) {
+    if (hidden === extHidden) return;
+    extHidden = hidden;
     bar.classList.toggle("ca-hidden", extHidden);
     // 페이지의 형광펜·네모(영상 캡처 제외 — 그건 이미 박스 없음)도 함께 숨김/복원
     document.documentElement.classList.toggle("ca-ext-off", extHidden);
@@ -768,6 +777,10 @@
       panel.style.display = panelDisplayBeforeHide;
       refreshAnnotationsPanel(); // 숨김 해제 시에도 그동안의 주석 변경 반영(내부 가드로 안전)
     }
+  }
+  chrome.runtime.onMessage.addListener((msg) => {
+    if (!msg || msg.type !== "toggle-toolbar") return;
+    setExtHidden(!extHidden); // 확장 아이콘 = 토글
   });
 
   // ---------- 형광펜 ----------

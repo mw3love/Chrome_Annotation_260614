@@ -2,9 +2,24 @@
 
 > 다른 PC에서 이어서 작업할 때 전후사정을 파악하기 위한 메모. (Claude는 세션 간 대화를 기억하지 못하므로 이 파일로 맥락을 넘긴다.)
 
-## 최종 업데이트: 2026-06-21 (0.12.0 Notion DB 한글화 + 타입 시그니처 발견(이름 자유) + Status 타입 — 아래 ★ 먼저 읽을 것)
+## 최종 업데이트: 2026-06-30 (0.14.0 백틱 순수 토글 + 툴바 닫기(×) 버튼 — 아래 ★ 먼저 읽을 것)
 
 ## ★ 진행 중 / 다음 작업 (새 세션은 여기부터)
+
+### (NEW) 0.14.0 — 백틱 순수 토글 + 툴바 닫기(×) 버튼 (`content.js`·`content.css`·`manifest.json`)
+
+> 사용자 피드백: ① 백틱이 도구막대를 펼치면서 형광펜까지 켜져 의도치 않게 칠해짐 → 백틱은 **도구 토글만**. ② AI 사전처럼 최소화/닫기 버튼이 있으면 좋겠다.
+
+**A) 백틱 = 순수 토글 (`content.js`)**
+- `backtickUsed` 1회용 플래그 + '처음 펼칠 때 `activateHighlight()`' 제거. 백틱은 이제 `toggleBar()`(접기/펼치기)만. 형광펜은 버튼·`Alt+1`로만.
+
+**B) 닫기(×) 버튼 = 확장 아이콘 OFF와 통합 (`content.js`·`content.css`)**
+- 멘탈 모델(AI 사전): **최소화 = 기존 접기(▸ 작은 핸들만 남김)** / **닫기(×) = 화면에서 완전히 숨김**. 닫기는 별도 상태를 새로 만들지 않고 **기존 `extHidden`(확장 아이콘 OFF)과 동일 동작으로 합침** — '숨김' 개념 하나로 단순화(사용자 선택).
+- `extHidden` 토글 로직을 `setExtHidden(hidden)` 함수로 추출 → 확장 아이콘 메시지 리스너·× 버튼·백틱 복귀가 공용.
+- × 버튼은 `.ca-bar-main` 안에 배치 → **접힘(최소화) 상태에선 자동으로 안 보임**(작은 핸들만 남는 모델과 일치). hover 시 빨강(`.ca-bar-close`).
+- **복귀 경로 둘**: 백틱(닫힌 상태에서 `setExtHidden(false)`) 또는 확장 아이콘. 닫기는 `ca-bar-collapsed`를 안 건드려 복귀 시 직전 펼침/접힘 상태가 그대로 복원.
+
+**검증 상태**: `node --check` 구문 통과 + 로직 자기검토. **프록시검증(실조건 미확인)** — 실제 브라우저에서 ×클릭→사라짐→백틱복귀 눈 확인은 사용자 몫(확장 새로고침 + 탭 새로고침 후).
 
 ### (NEW) 0.12.0 — Notion DB 한글화 + 타입 시그니처 발견(이름 자유) + Status 타입 (`worker.js`·`manifest.json`)
 
@@ -182,7 +197,7 @@
 - **이미지 캡션**: 정리 패널 이미지 아래 `.ca-cap` 편집칸 → `rect.caption`. 내보내기: 노션 이미지 블록 네이티브 `caption`(worker `notionExportBlocks`) + PDF `figcaption`.
 - **입력칸 키 격리(`swallowTypingKeys`)**: 우리 편집칸(노트·캡션·입력창) 타이핑 시 키를 페이지로 안 흘림(유튜브 스페이스=재생 차단). 단 Alt/Ctrl/Meta 조합은 통과 → 입력 중에도 Alt+숫자 단축키 동작(단축키 핸들러도 `typing && !altKey`로 완화).
 - **영상 인식 캡처**: 박스 중심이 `<video>` 위면(`videoUnder`) → `ann.videoTime`(=currentTime)·`videoIdx`·`videoTop` 기록, 박스는 캡처 후 제거(페이지에 안 남김). `collectSorted` 정렬키 = (y, videoTime) — 영상 캡처는 영상 문서-Y로 묶이고 시간순(같은 영상은 첫 캡처 videoTop 재사용 → 스크롤/미니플레이어에도 안 흩어짐). 패널에 `▶ mm:ss` 배지(클릭 시 `video.currentTime=t` + scrollIntoView). 내보내기 캡션 앞에 `[mm:ss]`.
-- **확장 OFF(브라우저 아이콘 토글)**: `document.documentElement`에 `ca-ext-off` → CSS로 `.ca-rect` 숨김·`.ca-hl` 배경 제거(텍스트 보존). 끌 때 `applyMode(null)`로 그리기 모드·커서·테두리 해제. 단축키 핸들러는 `extHidden`이면 early-return(꺼진 상태에서 백틱이 숨겨진 도구막대 기준 0,0으로 패널을 띄워 깨지던 버그 수정).
+- **확장 OFF / 닫기(`extHidden`, `setExtHidden()`)**: 브라우저 아이콘 토글·툴바 ×(닫기) 버튼 공용. `document.documentElement`에 `ca-ext-off` → CSS로 `.ca-rect` 숨김·`.ca-hl` 배경 제거(텍스트 보존). 끌 때 `applyMode(null)`로 그리기 모드·커서·테두리 해제. 닫힌 상태에선 단축키 무시하되 **백틱만 복귀 트리거로 허용**(`setExtHidden(false)`) — 그 외 키는 early-return(꺼진 상태에서 백틱이 숨겨진 도구막대 기준 0,0으로 패널을 띄워 깨지던 버그는 복귀 후 정상 상태라 무관). 0.14.0 이전엔 백틱도 early-return이라 복귀가 아이콘 전용이었음.
 
 ### 배경 — 영상엔 기존 네모 모델이 부적합
 기존 네모는 page-Y 정렬·박스 유지라 정적 텍스트(기사·논문)엔 맞지만, 영상은 플레이어가 한 자리 고정+시간축이라 Y정렬이 뒤죽박죽이고 박스가 시청을 방해. → 영상 위에서만 시간축 모델로 자동 전환(기사용 네모는 그대로 유지, 추가 기능).

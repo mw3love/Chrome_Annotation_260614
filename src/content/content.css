@@ -153,6 +153,15 @@ html.ca-ext-off .ca-hl {
 .ca-toolbar button[data-act="notion"]:hover {
   background: #a93226;
 }
+/* 닫기(×) — 화면에서 숨김. hover 시 빨강으로 '닫기' 의미 신호 */
+.ca-toolbar button.ca-bar-close {
+  color: #6b727c;
+  padding: 7px 8px;
+}
+.ca-toolbar button.ca-bar-close:hover {
+  background: #3a2424;
+  color: #ff6b6b;
+}
 /* 도구 그룹 구분선 (형광펜·네모 | 정리·AI | Notion) */
 .ca-sep {
   width: 1px;
